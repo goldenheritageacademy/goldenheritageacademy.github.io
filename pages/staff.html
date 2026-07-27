@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Staff — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .staff-tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .staff-tab-btn { padding:8px 16px; border-radius:var(--radius-md); border:1px solid var(--ink); background:transparent; cursor:pointer; font-weight:600; }
+  .staff-tab-btn.active { background:var(--brass); color:#fff; }
+  .staff-tab-panel { display:none; }
+  .staff-tab-panel.active { display:block; }
+  .sheet-controls { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px; }
+  .sheet-controls .field { margin:0; min-width:140px; }
+  .num-input { width:80px; }
+  .row-actions { display:flex; gap:6px; }
+  .dept-inline-add { font-size:0.85em; margin-top:4px; cursor:pointer; color:var(--brass); text-decoration:underline; display:inline-block; }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Staff & Salary</span>
+    <h1>Staff</h1>
+  </div>
+
+  <div class="staff-tabs">
+    <button class="staff-tab-btn active" data-tab="sheet">Salary Sheet</button>
+    <button class="staff-tab-btn" data-tab="add">Add Staff</button>
+    <button class="staff-tab-btn" data-tab="list">Staff List</button>
+  </div>
+
+  <!-- ============ TAB 1: SALARY SHEET ============ -->
+  <div class="staff-tab-panel active" id="panel-sheet">
+    <div class="card">
+      <div class="sheet-controls">
+        <div class="field">
+          <label for="sheetMonth">Month</label>
+          <select class="input" id="sheetMonth"></select>
+        </div>
+        <div class="field">
+          <label for="sheetYear">Year</label>
+          <input class="input" id="sheetYear" type="number" />
+        </div>
+        <div class="field">
+          <label for="sheetType">Type</label>
+          <select class="input" id="sheetType">
+            <option value="">All types</option>
+            <option value="teaching">Teaching</option>
+            <option value="non_teaching">Non-teaching</option>
+            <option value="guest">Guest lecture</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="loadSheetBtn">Load</button>
+        <div class="field">
+          <label for="sheetSort">Sort by</label>
+          <select class="input" id="sheetSort">
+            <option value="name">Name</option>
+            <option value="due_desc">Due (high → low)</option>
+            <option value="due_asc">Due (low → high)</option>
+          </select>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="hidePaidChk" /> Hide paid
+        </label>
+      </div>
+      <div id="sheetArea"><div class="empty-state"><div class="icon">📋</div><p>Select month, year and type, then click Load.</p></div></div>
+    </div>
+  </div>
+
+  <!-- ============ TAB 2: ADD STAFF ============ -->
+  <div class="staff-tab-panel" id="panel-add">
+    <div class="card">
+      <div class="field">
+        <label for="asName">Staff name</label>
+        <input class="input" id="asName" />
+        <div class="field-error" id="asNameErr">Staff name is required.</div>
+      </div>
+      <div class="field">
+        <label for="asMobile">Mobile no</label>
+        <input class="input" id="asMobile" />
+      </div>
+      <div class="field">
+        <label for="asType">Type</label>
+        <select class="input" id="asType">
+          <option value="teaching">Teaching</option>
+          <option value="non_teaching">Non-teaching</option>
+          <option value="guest">Guest lecture</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="asDept">Department</label>
+        <select class="input" id="asDept"></select>
+        <span class="dept-inline-add" id="asDeptAddLink">+ New department</span>
+      </div>
+      <div class="field">
+        <label for="asJoin">Joining date</label>
+        <input class="input" id="asJoin" type="date" />
+        <div class="field-error" id="asJoinErr">Joining date is required.</div>
+      </div>
+      <div class="field">
+        <label for="asSalary">Starting salary</label>
+        <input class="input" id="asSalary" type="number" step="0.01" />
+        <div class="field-error" id="asSalaryErr">Starting salary is required.</div>
+      </div>
+      <div class="field">
+        <label for="asRemark">Remark (optional)</label>
+        <input class="input" id="asRemark" />
+      </div>
+      <button class="btn btn-primary" id="asSaveBtn">Add staff</button>
+    </div>
+  </div>
+
+  <!-- ============ TAB 3: STAFF LIST ============ -->
+  <div class="staff-tab-panel" id="panel-list">
+    <div class="card">
+      <div class="field">
+        <input class="input" id="staffSearch" placeholder="Search by name or mobile no..." />
+      </div>
+      <div id="staffListArea"><div class="skeleton" style="height:18px"></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "staff";
+let myAccess = null;
+let departmentsCache = [];
+let staffCache = [];
+
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function firstOfMonth(year, monthIndex0) {
+  const m = String(monthIndex0 + 1).padStart(2, "0");
+  return `${year}-${m}-01`;
+}
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  document.querySelectorAll(".staff-tab-btn").forEach(btn => {
+    btn.onclick = () => switchTab(btn.dataset.tab);
+  });
+
+  const monthSel = document.getElementById("sheetMonth");
+  monthSel.innerHTML = MONTH_NAMES.map((m, i) => `<option value="${i}">${m}</option>`).join("");
+  const now = new Date();
+  monthSel.value = now.getMonth();
+  document.getElementById("sheetYear").value = now.getFullYear();
+
+  document.getElementById("loadSheetBtn").onclick = loadSalarySheet;
+  document.getElementById("sheetSort").onchange = renderSalarySheet;
+  document.getElementById("hidePaidChk").onchange = renderSalarySheet;
+
+  document.getElementById("asType").onchange = () => populateDeptDropdown("asDept", document.getElementById("asType").value);
+  document.getElementById("asDeptAddLink").onclick = () => openDepartmentModal(document.getElementById("asType").value, "asDept");
+  document.getElementById("asSaveBtn").onclick = saveNewStaff;
+
+  document.getElementById("staffSearch").oninput = renderStaffList;
+
+  await loadDepartments();
+  populateDeptDropdown("asDept", document.getElementById("asType").value);
+  await loadStaffList();
+}
+
+function switchTab(tab) {
+  document.querySelectorAll(".staff-tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".staff-tab-panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + tab));
+}
+
+// ---------------- Departments ----------------
+async function loadDepartments() {
+  const { data, error } = await supabaseClient.from("departments").select("*").order("department_name");
+  if (error) { showToast("Failed to load departments: " + error.message, "error"); return; }
+  departmentsCache = data || [];
+}
+
+function populateDeptDropdown(selectId, staffType, selectedId) {
+  const wantType = staffType === "non_teaching" ? "non_teaching" : "teaching";
+  const sel = document.getElementById(selectId);
+  const opts = departmentsCache.filter(d => d.department_type === wantType);
+  sel.innerHTML = opts.map(d => `<option value="${d.department_id}">${escapeHtml(d.department_name)}</option>`).join("");
+  if (selectedId) sel.value = selectedId;
+}
+
+function openDepartmentModal(currentStaffType, targetSelectId) {
+  const wantType = currentStaffType === "non_teaching" ? "non_teaching" : "teaching";
+  openModal({
+    title: "New department",
+    subtitle: `Type: ${wantType === "teaching" ? "Teaching / Guest" : "Non-teaching"}`,
+    bodyHtml: `
+      <div class="field">
+        <label for="ndName">Department name</label>
+        <input class="input" id="ndName" />
+        <div class="field-error" id="ndNameErr">Department name is required.</div>
+      </div>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-primary" id="ndSaveBtn">Add department</button>`,
+    onOpen: () => {
+      document.getElementById("ndSaveBtn").onclick = async () => {
+        const name = document.getElementById("ndName").value.trim();
+        if (!name) { document.getElementById("ndNameErr").classList.add("show"); return; }
+        const record = await withAuditStamp({ department_name: name, department_type: wantType }, { isNew: true });
+        const { data, error } = await supabaseClient.from("departments").insert(record).select().single();
+        if (error) { showToast("Failed to add department: " + error.message, "error"); return; }
+        await logAudit("departments", data.department_id, "insert", null, record);
+        await loadDepartments();
+        populateDeptDropdown(targetSelectId, currentStaffType, data.department_id);
+        showToast("Department added.", "success");
+        closeModal();
+      };
+    }
+  });
+}
+
+// ---------------- Add staff ----------------
+async function saveNewStaff() {
+  const name = document.getElementById("asName").value.trim();
+  const mobile = document.getElementById("asMobile").value.trim();
+  const staffType = document.getElementById("asType").value;
+  const deptId = document.getElementById("asDept").value || null;
+  const joinDate = document.getElementById("asJoin").value;
+  const salary = parseFloat(document.getElementById("asSalary").value);
+  const remark = document.getElementById("asRemark").value.trim();
+
+  let hasError = false;
+  document.getElementById("asNameErr").classList.toggle("show", !name);
+  if (!name) hasError = true;
+  document.getElementById("asJoinErr").classList.toggle("show", !joinDate);
+  if (!joinDate) hasError = true;
+  document.getElementById("asSalaryErr").classList.toggle("show", isNaN(salary));
+  if (isNaN(salary)) hasError = true;
+  if (hasError) return;
+
+  const btn = document.getElementById("asSaveBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const staffRecord = await withAuditStamp({
+    staff_name: name, mobile_no: mobile || null, staff_type: staffType,
+    department_id: deptId, joining_date: joinDate, remark: remark || null, is_active: true
+  }, { isNew: true });
+
+  const { data: staffRow, error: staffErr } = await supabaseClient.from("staff").insert(staffRecord).select().single();
+  if (staffErr) { showToast("Failed to add staff: " + staffErr.message, "error"); btn.disabled = false; btn.innerHTML = "Add staff"; return; }
+  await logAudit("staff", staffRow.staff_id, "insert", null, staffRecord);
+
+  const joinDateObj = new Date(joinDate);
+  const effMonth = firstOfMonth(joinDateObj.getFullYear(), joinDateObj.getMonth());
+  const salaryRecord = await withAuditStamp({ staff_id: staffRow.staff_id, salary_amount: salary, effective_month: effMonth }, { isNew: true });
+  const { data: salRow, error: salErr } = await supabaseClient.from("staff_salary_history").insert(salaryRecord).select().single();
+  if (salErr) { showToast("Staff added, but starting salary failed: " + salErr.message, "error"); }
+  else { await logAudit("staff_salary_history", salRow.salary_history_id, "insert", null, salaryRecord); }
+
+  showToast("Staff added.", "success");
+  btn.disabled = false; btn.innerHTML = "Add staff";
+  document.getElementById("asName").value = "";
+  document.getElementById("asMobile").value = "";
+  document.getElementById("asJoin").value = "";
+  document.getElementById("asSalary").value = "";
+  document.getElementById("asRemark").value = "";
+
+  await loadStaffList();
+}
+
+// ---------------- Staff list ----------------
+async function loadStaffList() {
+  const { data, error } = await supabaseClient
+    .from("staff")
+    .select("*, departments(department_name)")
+    .order("staff_name");
+  if (error) { showToast("Failed to load staff: " + error.message, "error"); return; }
+  staffCache = data || [];
+  renderStaffList();
+}
+
+function renderStaffList() {
+  const q = document.getElementById("staffSearch").value.trim().toLowerCase();
+  const area = document.getElementById("staffListArea");
+  const filtered = staffCache.filter(s =>
+    !q || s.staff_name.toLowerCase().includes(q) || (s.mobile_no || "").includes(q)
+  );
+  if (!filtered.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">🧑‍🏫</div><p>No staff found.</p></div>`;
+    return;
+  }
+  area.innerHTML = `
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Name</th><th>Type</th><th>Department</th><th>Mobile</th><th>Status</th></tr></thead>
+        <tbody>
+          ${filtered.map(s => `
+            <tr class="staff-row" data-id="${s.staff_id}" style="cursor:pointer;">
+              <td>${escapeHtml(s.staff_name)}</td>
+              <td>${staffTypeLabel(s.staff_type)}</td>
+              <td>${escapeHtml(s.departments?.department_name || "-")}</td>
+              <td>${escapeHtml(s.mobile_no || "-")}</td>
+              <td>${statusBadge(s.is_active ? "active" : "deactivated")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+  area.querySelectorAll(".staff-row").forEach(tr => {
+    tr.onclick = () => openStaffDetailModal(tr.dataset.id);
+  });
+}
+
+function staffTypeLabel(t) {
+  return t === "teaching" ? "Teaching" : t === "non_teaching" ? "Non-teaching" : "Guest lecture";
+}
+
+async function openStaffDetailModal(staffId) {
+  const staffRow = staffCache.find(s => s.staff_id === staffId);
+  if (!staffRow) return;
+
+  const { data: history, error } = await supabaseClient
+    .from("staff_salary_history")
+    .select("*")
+    .eq("staff_id", staffId)
+    .order("effective_month", { ascending: false });
+  if (error) { showToast("Failed to load salary history: " + error.message, "error"); return; }
+
+  const canEdit = myAccess.level === "full";
+
+  openModal({
+    title: staffRow.staff_name,
+    subtitle: `${staffTypeLabel(staffRow.staff_type)} • ${staffRow.departments?.department_name || "No department"}`,
+    wide: true,
+    bodyHtml: `
+      <p><strong>Mobile:</strong> ${escapeHtml(staffRow.mobile_no || "-")}</p>
+      <p><strong>Joining date:</strong> ${staffRow.joining_date}</p>
+      <p><strong>Remark:</strong> ${escapeHtml(staffRow.remark || "-")}</p>
+      <p><strong>Status:</strong> ${statusBadge(staffRow.is_active ? "active" : "deactivated")}</p>
+      <h4 style="margin-top:16px;">Salary history</h4>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Effective from</th><th>Amount</th></tr></thead>
+          <tbody>
+            ${(history || []).map(h => `<tr><td>${h.effective_month}</td><td>${h.salary_amount}</td></tr>`).join("") || '<tr><td colspan="2">No salary recorded.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `,
+    footHtml: canEdit ? `
+      <button class="btn btn-ghost" data-close>Close</button>
+      <button class="btn btn-accent" id="detChangeSalaryBtn">Change salary</button>
+      <button class="btn btn-primary" id="detEditBtn">Edit</button>
+      <button class="btn btn-danger" id="detDeactivateBtn">${staffRow.is_active ? "Deactivate" : "Reactivate"}</button>
+    ` : `<button class="btn btn-ghost" data-close>Close</button>`,
+    onOpen: () => {
+      if (!canEdit) return;
+      document.getElementById("detChangeSalaryBtn").onclick = () => openChangeSalaryModal(staffRow);
+      document.getElementById("detEditBtn").onclick = () => openEditStaffModal(staffRow);
+      document.getElementById("detDeactivateBtn").onclick = () => toggleStaffActive(staffRow);
+    }
+  });
+}
+
+function openChangeSalaryModal(staffRow) {
+  const now = new Date();
+  const defaultMonth = firstOfMonth(now.getFullYear(), now.getMonth());
+  openModal({
+    title: "Change salary",
+    subtitle: staffRow.staff_name,
+    bodyHtml: `
+      <div class="field">
+        <label for="csAmount">New salary amount</label>
+        <input class="input" id="csAmount" type="number" step="0.01" />
+        <div class="field-error" id="csAmountErr">Amount is required.</div>
+      </div>
+      <div class="field">
+        <label for="csMonth">Effective from (month)</label>
+        <input class="input" id="csMonth" type="month" value="${defaultMonth.slice(0,7)}" />
+      </div>
+      <p style="font-size:0.85em;color:var(--ink);opacity:0.8;">
+        Months before this one keep the old salary. This month onward uses the new amount.
+      </p>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-primary" id="csSaveBtn">Save</button>`,
+    onOpen: () => {
+      document.getElementById("csSaveBtn").onclick = async () => {
+        const amount = parseFloat(document.getElementById("csAmount").value);
+        const monthVal = document.getElementById("csMonth").value; // "YYYY-MM"
+        if (isNaN(amount) || !monthVal) { document.getElementById("csAmountErr").classList.add("show"); return; }
+        const effMonth = monthVal + "-01";
+
+        const { data: existing } = await supabaseClient
+          .from("staff_salary_history").select("*")
+          .eq("staff_id", staffRow.staff_id).eq("effective_month", effMonth).maybeSingle();
+
+        if (existing) {
+          const record = await withAuditStamp({ salary_amount: amount }, { isNew: false });
+          const { error } = await supabaseClient.from("staff_salary_history").update(record).eq("salary_history_id", existing.salary_history_id);
+          if (error) { showToast("Failed to update salary: " + error.message, "error"); return; }
+          await logAudit("staff_salary_history", existing.salary_history_id, "update", existing, record);
+        } else {
+          const record = await withAuditStamp({ staff_id: staffRow.staff_id, salary_amount: amount, effective_month: effMonth }, { isNew: true });
+          const { data, error } = await supabaseClient.from("staff_salary_history").insert(record).select().single();
+          if (error) { showToast("Failed to save salary change: " + error.message, "error"); return; }
+          await logAudit("staff_salary_history", data.salary_history_id, "insert", null, record);
+        }
+        showToast("Salary updated.", "success");
+        closeModal();
+      };
+    }
+  });
+}
+
+function openEditStaffModal(staffRow) {
+  openModal({
+    title: "Edit staff",
+    subtitle: staffRow.staff_name,
+    bodyHtml: `
+      <div class="field"><label for="esName">Staff name</label><input class="input" id="esName" value="${escapeHtml(staffRow.staff_name)}" /></div>
+      <div class="field"><label for="esMobile">Mobile no</label><input class="input" id="esMobile" value="${escapeHtml(staffRow.mobile_no || "")}" /></div>
+      <div class="field">
+        <label for="esType">Type</label>
+        <select class="input" id="esType">
+          <option value="teaching" ${staffRow.staff_type==="teaching"?"selected":""}>Teaching</option>
+          <option value="non_teaching" ${staffRow.staff_type==="non_teaching"?"selected":""}>Non-teaching</option>
+          <option value="guest" ${staffRow.staff_type==="guest"?"selected":""}>Guest lecture</option>
+        </select>
+      </div>
+      <div class="field"><label for="esDept">Department</label><select class="input" id="esDept"></select></div>
+      <div class="field"><label for="esJoin">Joining date</label><input class="input" id="esJoin" type="date" value="${staffRow.joining_date}" /></div>
+      <div class="field"><label for="esRemark">Remark</label><input class="input" id="esRemark" value="${escapeHtml(staffRow.remark || "")}" /></div>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-primary" id="esSaveBtn">Save changes</button>`,
+    onOpen: () => {
+      populateDeptDropdown("esDept", staffRow.staff_type, staffRow.department_id);
+      document.getElementById("esType").onchange = () => populateDeptDropdown("esDept", document.getElementById("esType").value);
+      document.getElementById("esSaveBtn").onclick = async () => {
+        const record = await withAuditStamp({
+          staff_name: document.getElementById("esName").value.trim(),
+          mobile_no: document.getElementById("esMobile").value.trim() || null,
+          staff_type: document.getElementById("esType").value,
+          department_id: document.getElementById("esDept").value || null,
+          joining_date: document.getElementById("esJoin").value,
+          remark: document.getElementById("esRemark").value.trim() || null
+        }, { isNew: false });
+        const { error } = await supabaseClient.from("staff").update(record).eq("staff_id", staffRow.staff_id);
+        if (error) { showToast("Update failed: " + error.message, "error"); return; }
+        await logAudit("staff", staffRow.staff_id, "update", staffRow, record);
+        showToast("Staff updated.", "success");
+        closeModal();
+        await loadStaffList();
+      };
+    }
+  });
+}
+
+async function toggleStaffActive(staffRow) {
+  const willActivate = !staffRow.is_active;
+  openModal({
+    title: willActivate ? "Reactivate staff?" : "Deactivate staff?",
+    subtitle: staffRow.staff_name,
+    bodyHtml: `<p>Are you sure you want to ${willActivate ? "reactivate" : "deactivate"} <strong>${escapeHtml(staffRow.staff_name)}</strong>?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmToggleBtn">${willActivate ? "Reactivate" : "Deactivate"}</button>`,
+    onOpen: () => {
+      document.getElementById("confirmToggleBtn").onclick = async () => {
+        const record = await withAuditStamp({ is_active: willActivate, deactivated_at: willActivate ? null : new Date().toISOString() }, { isNew: false });
+        const { error } = await supabaseClient.from("staff").update(record).eq("staff_id", staffRow.staff_id);
+        if (error) { showToast("Failed: " + error.message, "error"); return; }
+        await logAudit("staff", staffRow.staff_id, "update", staffRow, record);
+        showToast(willActivate ? "Staff reactivated." : "Staff deactivated.", "success");
+        closeModal();
+        await loadStaffList();
+      };
+    }
+  });
+}
+
+// ---------------- Salary sheet ----------------
+let sheetRowsCache = [];
+
+async function loadSalarySheet() {
+  const monthIdx = parseInt(document.getElementById("sheetMonth").value, 10);
+  const year = parseInt(document.getElementById("sheetYear").value, 10);
+  const staffType = document.getElementById("sheetType").value;
+  const salaryMonth = firstOfMonth(year, monthIdx);
+
+  const area = document.getElementById("sheetArea");
+  area.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
+
+  let query = supabaseClient.from("staff").select("*, departments(department_name)").eq("is_active", true);
+  if (staffType) query = query.eq("staff_type", staffType);
+  const { data: staffRows, error: staffErr } = await query;
+  if (staffErr) { showToast("Failed to load staff: " + staffErr.message, "error"); return; }
+
+  const staffIds = (staffRows || []).map(s => s.staff_id);
+  if (!staffIds.length) { sheetRowsCache = []; renderSalarySheet(); return; }
+
+  const [{ data: salHist }, { data: adjustments }, { data: payments }] = await Promise.all([
+    supabaseClient.from("staff_salary_history").select("*").in("staff_id", staffIds).lte("effective_month", salaryMonth),
+    supabaseClient.from("salary_month_adjustments").select("*").in("staff_id", staffIds).eq("salary_month", salaryMonth),
+    supabaseClient.from("salary_payments").select("*").in("staff_id", staffIds).eq("salary_month", salaryMonth)
+  ]);
+
+  sheetRowsCache = staffRows.map(s => {
+    const histRows = (salHist || []).filter(h => h.staff_id === s.staff_id).sort((a,b) => b.effective_month.localeCompare(a.effective_month));
+    const salary = histRows.length ? parseFloat(histRows[0].salary_amount) : 0;
+    const adj = (adjustments || []).find(a => a.staff_id === s.staff_id);
+    const absentDays = adj ? parseFloat(adj.absent_days) : 0;
+    const bonus = adj ? parseFloat(adj.bonus_amount) : 0;
+    const collected = (payments || []).filter(p => p.staff_id === s.staff_id).reduce((sum, p) => sum + parseFloat(p.amount) + parseFloat(p.discount), 0);
+    const deduction = salary / 30 * absentDays;
+    const netPayable = salary - deduction + bonus;
+    const due = netPayable - collected;
+    return {
+      staff: s, salaryMonth, salary, absentDays, bonus, deduction, netPayable, collected, due,
+      status: due <= 0.01 ? "paid" : "pending"
+    };
+  });
+
+  renderSalarySheet();
+}
+
+function renderSalarySheet() {
+  const area = document.getElementById("sheetArea");
+  const sort = document.getElementById("sheetSort").value;
+  const hidePaid = document.getElementById("hidePaidChk").checked;
+
+  let rows = [...sheetRowsCache];
+  if (hidePaid) rows = rows.filter(r => r.status !== "paid");
+  if (sort === "name") rows.sort((a,b) => a.staff.staff_name.localeCompare(b.staff.staff_name));
+  else if (sort === "due_asc") rows.sort((a,b) => a.due - b.due);
+  else if (sort === "due_desc") rows.sort((a,b) => b.due - a.due);
+
+  if (!rows.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">📋</div><p>No staff match this selection.</p></div>`;
+    return;
+  }
+
+  area.innerHTML = `
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Name</th><th>Department</th><th>Salary</th><th>Absent days</th>
+            <th>Deduction</th><th>Bonus</th><th>Net payable</th><th>Collected</th><th>Due</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr data-staff-id="${r.staff.staff_id}">
+              <td>${escapeHtml(r.staff.staff_name)}</td>
+              <td>${escapeHtml(r.staff.departments?.department_name || "-")}</td>
+              <td>${r.salary.toFixed(2)}</td>
+              <td><input class="input num-input absent-input" type="number" step="0.5" value="${r.absentDays}" /></td>
+              <td class="ded-cell">${r.deduction.toFixed(2)}</td>
+              <td><input class="input num-input bonus-input" type="number" step="0.01" value="${r.bonus}" /></td>
+              <td class="net-cell">${r.netPayable.toFixed(2)}</td>
+              <td>${r.collected.toFixed(2)}</td>
+              <td class="due-cell">${r.due.toFixed(2)}</td>
+              <td>${statusBadge(r.status === "paid" ? "paid" : "pending")}</td>
+              <td><button class="btn btn-primary btn-sm save-adj-btn">Save</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  area.querySelectorAll("tr[data-staff-id]").forEach(tr => {
+    const staffId = tr.dataset.staffId;
+    const rowData = rows.find(r => r.staff.staff_id === staffId);
+    const absentInput = tr.querySelector(".absent-input");
+    const bonusInput = tr.querySelector(".bonus-input");
+    const dedCell = tr.querySelector(".ded-cell");
+    const netCell = tr.querySelector(".net-cell");
+    const dueCell = tr.querySelector(".due-cell");
+
+    function recalc() {
+      const absentDays = parseFloat(absentInput.value) || 0;
+      const bonus = parseFloat(bonusInput.value) || 0;
+      const deduction = rowData.salary / 30 * absentDays;
+      const netPayable = rowData.salary - deduction + bonus;
+      const due = netPayable - rowData.collected;
+      dedCell.textContent = deduction.toFixed(2);
+      netCell.textContent = netPayable.toFixed(2);
+      dueCell.textContent = due.toFixed(2);
+    }
+    absentInput.oninput = recalc;
+    bonusInput.oninput = recalc;
+
+    tr.querySelector(".save-adj-btn").onclick = async () => {
+      const absentDays = parseFloat(absentInput.value) || 0;
+      const bonus = parseFloat(bonusInput.value) || 0;
+      const { data: existing } = await supabaseClient
+        .from("salary_month_adjustments").select("*")
+        .eq("staff_id", staffId).eq("salary_month", rowData.salaryMonth).maybeSingle();
+
+      if (existing) {
+        const record = await withAuditStamp({ absent_days: absentDays, bonus_amount: bonus }, { isNew: false });
+        const { error } = await supabaseClient.from("salary_month_adjustments").update(record).eq("adjustment_id", existing.adjustment_id);
+        if (error) { showToast("Save failed: " + error.message, "error"); return; }
+        await logAudit("salary_month_adjustments", existing.adjustment_id, "update", existing, record);
+      } else {
+        const record = await withAuditStamp({ staff_id: staffId, salary_month: rowData.salaryMonth, absent_days: absentDays, bonus_amount: bonus }, { isNew: true });
+        const { data, error } = await supabaseClient.from("salary_month_adjustments").insert(record).select().single();
+        if (error) { showToast("Save failed: " + error.message, "error"); return; }
+        await logAudit("salary_month_adjustments", data.adjustment_id, "insert", null, record);
+      }
+      showToast("Saved.", "success");
+      await loadSalarySheet();
+    };
+  });
+}
+
+init();
+</script>
+</body>
+</html>
