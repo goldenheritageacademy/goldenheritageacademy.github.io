@@ -10,8 +10,8 @@
 // The anon/public key is safe to expose in front-end code; Row Level
 // Security (see sql/schema.sql) is what actually protects the data.
 // Security (see sql/schema.sql) is what actually protects the data.
-const SUPABASE_URL = "https://qnzswrntwuocryleohlh.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_byGbDf3HN9ocQD9pmnmVnQ_CSH9D5vd";
+const SUPABASE_URL = "https://wtenofzftfouqsfoqzdb.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable__-5phyyuJ0BULBVvIylYEw_yY7GVj-2";
 
 // ---- Login without email -----------------------------------------------
 // Supabase Auth requires an email under the hood. Users only ever see/type
