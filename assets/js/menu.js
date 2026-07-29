@@ -16,6 +16,37 @@ const MENU_ITEMS = [
     limitedAccess: [],                            // can read/enter only
     order: 1
   },
+   
+{
+  id: "voucher-setup",
+  label: "Voucher Setup",
+  icon: "🗂️",
+  file: "pages/voucher-setup.html",
+  group: "Accounts",
+  fullAccess: ["admin"],
+  limitedAccess: ["editor", "viewer"],
+  order: 10
+},
+{
+  id: "cash-voucher",
+  label: "Cash Voucher",
+  icon: "💵",
+  file: "pages/cash-voucher.html",
+  group: "Accounts",
+  fullAccess: ["admin"],
+  limitedAccess: ["editor", "viewer"],
+  order: 11
+},
+{
+  id: "creditor-voucher",
+  label: "Creditor Voucher",
+  icon: "🧾",
+  file: "pages/creditor-voucher.html",
+  group: "Accounts",
+  fullAccess: ["admin"],
+  limitedAccess: ["editor", "viewer"],
+  order: 12
+},
    {
   id: "admission",
   label: "Admission",
