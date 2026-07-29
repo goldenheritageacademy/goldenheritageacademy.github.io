@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cash Voucher — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+</head>
+<body>
+
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Accounts</span>
+    <h1>Cash Voucher</h1>
+    <p>Record a direct cash, bank, or PhonePe payment against a category.</p>
+    <button class="btn btn-primary" id="addBtn" style="display:none;">+ New Voucher</button>
+  </div>
+
+  <div class="card">
+    <div class="table-wrap" id="listArea">
+      <div class="skeleton" style="height:18px;"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "cash-voucher"; // must match menu.js id
+let myAccess = null;
+let categoriesCache = [];
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  const { data: cats } = await supabaseClient
+    .from("voucher_categories")
+    .select("*, voucher_heads(name)")
+    .order("name", { ascending: true });
+  categoriesCache = cats || [];
+
+  if (myAccess.level === "full" || myAccess.level === "limited") {
+    document.getElementById("addBtn").style.display = "inline-flex";
+    document.getElementById("addBtn").onclick = () => openVoucherModal(null);
+  }
+  await loadList();
+}
+
+async function loadList() {
+  const { data, error } = await supabaseClient
+    .from("cash_vouchers")
+    .select("*, voucher_categories(name, voucher_heads(name))")
+    .order("voucher_date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  const area = document.getElementById("listArea");
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Failed to load vouchers.</p></div>`; return; }
+  const rows = data || [];
+
+  if (!rows.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">💵</div><p>No cash vouchers yet.</p></div>`;
+    return;
+  }
+
+  const canEdit = myAccess.level === "full";
+  area.innerHTML = `
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Voucher No</th><th>Date</th><th>Head / Category</th><th>Paid To</th>
+          <th>Amount</th><th>Mode</th><th>Description</th><th style="width:140px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(v => `
+          <tr>
+            <td>${escapeHtml(v.voucher_no)}</td>
+            <td>${escapeHtml(v.voucher_date)}</td>
+            <td>${escapeHtml(v.voucher_categories?.voucher_heads?.name || "")} / ${escapeHtml(v.voucher_categories?.name || "")}</td>
+            <td>${escapeHtml(v.paid_to)}</td>
+            <td>₹${Number(v.amount).toFixed(2)}</td>
+            <td><span class="badge badge-neutral">${escapeHtml(v.payment_mode)}</span></td>
+            <td>${escapeHtml(v.description || "")}</td>
+            <td>
+              ${canEdit ? `
+                <button class="btn btn-ghost btn-sm" onclick='openVoucherModal(${JSON.stringify(v)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick='confirmDelete("${v.voucher_id}", ${JSON.stringify(v.voucher_no)})'>Delete</button>
+              ` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function categoryOptionsHtml(selectedId) {
+  return categoriesCache.map(c => `
+    <option value="${c.category_id}" ${selectedId === c.category_id ? "selected" : ""}>
+      ${escapeHtml(c.voucher_heads ? c.voucher_heads.name : "")} / ${escapeHtml(c.name)}
+    </option>
+  `).join("");
+}
+
+function openVoucherModal(existing) {
+  const isEdit = !!existing;
+  if (!categoriesCache.length) { showToast("Add a category in Voucher Setup first.", "error"); return; }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  openModal({
+    title: isEdit ? "Edit cash voucher" : "New cash voucher",
+    subtitle: isEdit ? "Update the voucher details" : "Record a cash / bank / PhonePe payment",
+    wide: true,
+    bodyHtml: `
+      <div class="field">
+        <label for="vNo">Voucher No</label>
+        <input class="input" id="vNo" value="${isEdit ? escapeHtml(existing.voucher_no) : ""}" />
+        <div class="field-error" id="vNoErr">Voucher number is required.</div>
+      </div>
+      <div class="field">
+        <label for="vDate">Date</label>
+        <input class="input" id="vDate" type="date" value="${isEdit ? existing.voucher_date : today}" />
+      </div>
+      <div class="field">
+        <label for="vCategory">Category</label>
+        <select class="input" id="vCategory">${categoryOptionsHtml(isEdit ? existing.category_id : null)}</select>
+      </div>
+      <div class="field">
+        <label for="vPaidTo">Whom is paying (payee)</label>
+        <input class="input" id="vPaidTo" value="${isEdit ? escapeHtml(existing.paid_to) : ""}" />
+        <div class="field-error" id="vPaidToErr">Payee name is required.</div>
+      </div>
+      <div class="field">
+        <label for="vAmount">Amount</label>
+        <input class="input" id="vAmount" type="number" step="0.01" value="${isEdit ? existing.amount : ""}" />
+        <div class="field-error" id="vAmountErr">Enter a valid amount.</div>
+      </div>
+      <div class="field">
+        <label for="vMode">Mode of payment</label>
+        <select class="input" id="vMode">
+          <option value="cash" ${isEdit && existing.payment_mode === "cash" ? "selected" : ""}>Cash</option>
+          <option value="bank" ${isEdit && existing.payment_mode === "bank" ? "selected" : ""}>Bank</option>
+          <option value="phonepe" ${isEdit && existing.payment_mode === "phonepe" ? "selected" : ""}>PhonePe</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="vDescription">Description</label>
+        <input class="input" id="vDescription" value="${isEdit ? escapeHtml(existing.description || "") : ""}" />
+      </div>
+      <div class="field">
+        <label for="vRemark">Remark (optional)</label>
+        <input class="input" id="vRemark" value="${isEdit ? escapeHtml(existing.remark || "") : ""}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveVoucherBtn">${isEdit ? "Save changes" : "Add voucher"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveVoucherBtn").onclick = () => saveVoucher(existing); }
+  });
+}
+
+async function saveVoucher(existing) {
+  const voucher_no = document.getElementById("vNo").value.trim();
+  const voucher_date = document.getElementById("vDate").value;
+  const category_id = document.getElementById("vCategory").value;
+  const paid_to = document.getElementById("vPaidTo").value.trim();
+  const amount = parseFloat(document.getElementById("vAmount").value);
+  const payment_mode = document.getElementById("vMode").value;
+  const description = document.getElementById("vDescription").value.trim();
+  const remark = document.getElementById("vRemark").value.trim();
+
+  let ok = true;
+  const noErr = document.getElementById("vNoErr");
+  const payeeErr = document.getElementById("vPaidToErr");
+  const amtErr = document.getElementById("vAmountErr");
+  if (!voucher_no) { noErr.classList.add("show"); ok = false; } else { noErr.classList.remove("show"); }
+  if (!paid_to) { payeeErr.classList.add("show"); ok = false; } else { payeeErr.classList.remove("show"); }
+  if (!amount || amount <= 0) { amtErr.classList.add("show"); ok = false; } else { amtErr.classList.remove("show"); }
+  if (!ok) return;
+
+  const btn = document.getElementById("saveVoucherBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const payload = { voucher_no, voucher_date, category_id, paid_to, amount, payment_mode, description, remark: remark || null };
+
+  if (existing) {
+    const record = await withAuditStamp(payload, { isNew: false });
+    const { error } = await supabaseClient.from("cash_vouchers").update(record).eq("voucher_id", existing.voucher_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Save changes"; return; }
+    await logAudit("cash_vouchers", existing.voucher_id, "update", existing, record);
+    showToast("Voucher updated.", "success");
+  } else {
+    const record = await withAuditStamp(payload, { isNew: true });
+    const { data, error } = await supabaseClient.from("cash_vouchers").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Add voucher"; return; }
+    await logAudit("cash_vouchers", data.voucher_id, "insert", null, record);
+    showToast("Voucher added.", "success");
+  }
+
+  closeModal();
+  await loadList();
+}
+
+function confirmDelete(id, label) {
+  openModal({
+    title: "Delete voucher?",
+    subtitle: "This cannot be undone.",
+    bodyHtml: `<p>Delete voucher "<strong>${escapeHtml(label)}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("cash_vouchers").delete().eq("voucher_id", id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("cash_vouchers", id, "delete", { voucher_no: label }, null);
+        closeModal();
+        showToast("Voucher deleted.", "success");
+        await loadList();
+      };
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
