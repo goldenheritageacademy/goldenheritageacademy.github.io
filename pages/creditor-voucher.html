@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Creditor Voucher — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+</head>
+<body>
+
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Accounts</span>
+    <h1>Creditor Voucher</h1>
+    <p>Track credit purchases and payments against creditors.</p>
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-primary" id="addPurchaseBtn" style="display:none;">+ Credit Purchase</button>
+      <button class="btn btn-accent" id="addPaymentBtn" style="display:none;">+ Creditor Payment</button>
+    </div>
+  </div>
+
+  <!-- BALANCES -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2 style="margin-top:0;">Creditor Balances</h2>
+    <div class="table-wrap" id="balancesArea">
+      <div class="skeleton" style="height:18px;"></div>
+    </div>
+  </div>
+
+  <!-- CREDIT PURCHASES -->
+  <div class="card" style="margin-bottom:20px;">
+    <h2 style="margin-top:0;">Credit Purchases</h2>
+    <div class="table-wrap" id="purchasesArea">
+      <div class="skeleton" style="height:18px;"></div>
+    </div>
+  </div>
+
+  <!-- CREDITOR PAYMENTS -->
+  <div class="card">
+    <h2 style="margin-top:0;">Creditor Payments</h2>
+    <div class="table-wrap" id="paymentsArea">
+      <div class="skeleton" style="height:18px;"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "creditor-voucher"; // must match menu.js id
+let myAccess = null;
+let creditorsCache = [];    // creditors joined with category/head names
+let balancesCache = [];     // from creditor_balances view, keyed by creditor_id
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  const { data: creds } = await supabaseClient
+    .from("creditors")
+    .select("*, voucher_categories(name, voucher_heads(name))")
+    .order("name", { ascending: true });
+  creditorsCache = creds || [];
+
+  if (myAccess.level === "full" || myAccess.level === "limited") {
+    document.getElementById("addPurchaseBtn").style.display = "inline-flex";
+    document.getElementById("addPaymentBtn").style.display = "inline-flex";
+    document.getElementById("addPurchaseBtn").onclick = () => openPurchaseModal(null);
+    document.getElementById("addPaymentBtn").onclick = () => openPaymentModal(null);
+  }
+
+  await loadBalances();
+  await loadPurchases();
+  await loadPayments();
+}
+
+/* ============================= BALANCES ============================= */
+
+async function loadBalances() {
+  const { data, error } = await supabaseClient
+    .from("creditor_balances")
+    .select("*")
+    .order("creditor_name", { ascending: true });
+
+  const area = document.getElementById("balancesArea");
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Failed to load balances.</p></div>`; return; }
+  balancesCache = data || [];
+
+  if (!balancesCache.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">🧾</div><p>No creditors yet — add one in Voucher Setup.</p></div>`;
+    return;
+  }
+
+  area.innerHTML = `
+    <table class="data">
+      <thead><tr><th>Creditor</th><th>Opening</th><th>Purchases</th><th>Payments</th><th>Total Due</th></tr></thead>
+      <tbody>
+        ${balancesCache.map(b => `
+          <tr>
+            <td>${escapeHtml(b.creditor_name)}</td>
+            <td>₹${Number(b.opening_balance).toFixed(2)}</td>
+            <td>₹${Number(b.total_purchases).toFixed(2)}</td>
+            <td>₹${Number(b.total_payments).toFixed(2)}</td>
+            <td><strong>₹${Number(b.total_due).toFixed(2)}</strong></td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function creditorOptionsHtml(selectedId) {
+  return creditorsCache.map(c => `
+    <option value="${c.creditor_id}" ${selectedId === c.creditor_id ? "selected" : ""}>
+      ${escapeHtml(c.name)} (${escapeHtml(c.voucher_categories ? c.voucher_categories.name : "")})
+    </option>
+  `).join("");
+}
+
+/* ========================== CREDIT PURCHASES ========================== */
+
+async function loadPurchases() {
+  const { data, error } = await supabaseClient
+    .from("credit_purchases")
+    .select("*, creditors(name)")
+    .order("purchase_date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  const area = document.getElementById("purchasesArea");
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Failed to load purchases.</p></div>`; return; }
+  const rows = data || [];
+
+  if (!rows.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">📦</div><p>No credit purchases yet.</p></div>`;
+    return;
+  }
+
+  const canEdit = myAccess.level === "full";
+  area.innerHTML = `
+    <table class="data">
+      <thead><tr><th>Date</th><th>Creditor</th><th>Amount</th><th>Description</th><th style="width:140px;"></th></tr></thead>
+      <tbody>
+        ${rows.map(p => `
+          <tr>
+            <td>${escapeHtml(p.purchase_date)}</td>
+            <td>${escapeHtml(p.creditors ? p.creditors.name : "")}</td>
+            <td>₹${Number(p.amount).toFixed(2)}</td>
+            <td>${escapeHtml(p.description || "")}</td>
+            <td>
+              ${canEdit ? `
+                <button class="btn btn-ghost btn-sm" onclick='openPurchaseModal(${JSON.stringify(p)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick='confirmDeletePurchase("${p.purchase_id}")'>Delete</button>
+              ` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function openPurchaseModal(existing) {
+  const isEdit = !!existing;
+  if (!creditorsCache.length) { showToast("Add a creditor in Voucher Setup first.", "error"); return; }
+  const today = new Date().toISOString().slice(0, 10);
+
+  openModal({
+    title: isEdit ? "Edit credit purchase" : "Add credit purchase",
+    subtitle: isEdit ? "Update the purchase" : "Adds to what is owed to this creditor",
+    bodyHtml: `
+      <div class="field">
+        <label for="pDate">Date</label>
+        <input class="input" id="pDate" type="date" value="${isEdit ? existing.purchase_date : today}" />
+      </div>
+      <div class="field">
+        <label for="pCreditor">Creditor</label>
+        <select class="input" id="pCreditor">${creditorOptionsHtml(isEdit ? existing.creditor_id : null)}</select>
+      </div>
+      <div class="field">
+        <label for="pAmount">Amount</label>
+        <input class="input" id="pAmount" type="number" step="0.01" value="${isEdit ? existing.amount : ""}" />
+        <div class="field-error" id="pAmountErr">Enter a valid amount.</div>
+      </div>
+      <div class="field">
+        <label for="pDescription">Description</label>
+        <input class="input" id="pDescription" value="${isEdit ? escapeHtml(existing.description || "") : ""}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="savePurchaseBtn">${isEdit ? "Save changes" : "Add purchase"}</button>
+    `,
+    onOpen: () => { document.getElementById("savePurchaseBtn").onclick = () => savePurchase(existing); }
+  });
+}
+
+async function savePurchase(existing) {
+  const purchase_date = document.getElementById("pDate").value;
+  const creditor_id = document.getElementById("pCreditor").value;
+  const amount = parseFloat(document.getElementById("pAmount").value);
+  const description = document.getElementById("pDescription").value.trim();
+
+  const amtErr = document.getElementById("pAmountErr");
+  if (!amount || amount <= 0) { amtErr.classList.add("show"); return; }
+  amtErr.classList.remove("show");
+
+  const btn = document.getElementById("savePurchaseBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const payload = { purchase_date, creditor_id, amount, description };
+
+  if (existing) {
+    const record = await withAuditStamp(payload, { isNew: false });
+    const { error } = await supabaseClient.from("credit_purchases").update(record).eq("purchase_id", existing.purchase_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Save changes"; return; }
+    await logAudit("credit_purchases", existing.purchase_id, "update", existing, record);
+    showToast("Purchase updated.", "success");
+  } else {
+    const record = await withAuditStamp(payload, { isNew: true });
+    const { data, error } = await supabaseClient.from("credit_purchases").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Add purchase"; return; }
+    await logAudit("credit_purchases", data.purchase_id, "insert", null, record);
+    showToast("Purchase added.", "success");
+  }
+
+  closeModal();
+  await loadBalances();
+  await loadPurchases();
+}
+
+function confirmDeletePurchase(id) {
+  openModal({
+    title: "Delete purchase?",
+    subtitle: "This cannot be undone and will reduce the creditor's total due.",
+    bodyHtml: `<p>Delete this credit purchase?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelPurchaseBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelPurchaseBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("credit_purchases").delete().eq("purchase_id", id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("credit_purchases", id, "delete", null, null);
+        closeModal();
+        showToast("Purchase deleted.", "success");
+        await loadBalances();
+        await loadPurchases();
+      };
+    }
+  });
+}
+
+/* ========================== CREDITOR PAYMENTS ========================== */
+
+async function loadPayments() {
+  const { data, error } = await supabaseClient
+    .from("creditor_payments")
+    .select("*, creditors(name)")
+    .order("payment_date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  const area = document.getElementById("paymentsArea");
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Failed to load payments.</p></div>`; return; }
+  const rows = data || [];
+
+  if (!rows.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">💳</div><p>No creditor payments yet.</p></div>`;
+    return;
+  }
+
+  const canEdit = myAccess.level === "full";
+  area.innerHTML = `
+    <table class="data">
+      <thead><tr><th>Voucher No</th><th>Date</th><th>Creditor</th><th>Amount</th><th>Mode</th><th>Remark</th><th style="width:140px;"></th></tr></thead>
+      <tbody>
+        ${rows.map(p => `
+          <tr>
+            <td>${escapeHtml(p.voucher_no)}</td>
+            <td>${escapeHtml(p.payment_date)}</td>
+            <td>${escapeHtml(p.creditors ? p.creditors.name : "")}</td>
+            <td>₹${Number(p.amount).toFixed(2)}</td>
+            <td><span class="badge badge-neutral">${escapeHtml(p.payment_mode)}</span></td>
+            <td>${escapeHtml(p.remark || "")}</td>
+            <td>
+              ${canEdit ? `
+                <button class="btn btn-ghost btn-sm" onclick='openPaymentModal(${JSON.stringify(p)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick='confirmDeletePayment("${p.payment_id}")'>Delete</button>
+              ` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function dueDisplayHtml(creditorId) {
+  const bal = balancesCache.find(b => b.creditor_id === creditorId);
+  const due = bal ? Number(bal.total_due).toFixed(2) : "0.00";
+  return `Total due: <strong>₹${due}</strong>`;
+}
+
+function openPaymentModal(existing) {
+  const isEdit = !!existing;
+  if (!creditorsCache.length) { showToast("Add a creditor in Voucher Setup first.", "error"); return; }
+  const today = new Date().toISOString().slice(0, 10);
+  const initialCreditorId = isEdit ? existing.creditor_id : (creditorsCache[0] ? creditorsCache[0].creditor_id : null);
+
+  openModal({
+    title: isEdit ? "Edit creditor payment" : "New creditor payment",
+    subtitle: isEdit ? "Update the payment" : "Reduces what is owed to this creditor",
+    bodyHtml: `
+      <div class="field">
+        <label for="payNo">Voucher No</label>
+        <input class="input" id="payNo" value="${isEdit ? escapeHtml(existing.voucher_no) : ""}" />
+        <div class="field-error" id="payNoErr">Voucher number is required.</div>
+      </div>
+      <div class="field">
+        <label for="payDate">Date</label>
+        <input class="input" id="payDate" type="date" value="${isEdit ? existing.payment_date : today}" />
+      </div>
+      <div class="field">
+        <label for="payCreditor">Creditor</label>
+        <select class="input" id="payCreditor">${creditorOptionsHtml(initialCreditorId)}</select>
+        <p id="payDue" style="margin:6px 0 0; font-size:0.9em;">${dueDisplayHtml(initialCreditorId)}</p>
+      </div>
+      <div class="field">
+        <label for="payAmount">Amount</label>
+        <input class="input" id="payAmount" type="number" step="0.01" value="${isEdit ? existing.amount : ""}" />
+        <div class="field-error" id="payAmountErr">Enter a valid amount.</div>
+      </div>
+      <div class="field">
+        <label for="payMode">Mode of payment</label>
+        <select class="input" id="payMode">
+          <option value="cash" ${isEdit && existing.payment_mode === "cash" ? "selected" : ""}>Cash</option>
+          <option value="bank" ${isEdit && existing.payment_mode === "bank" ? "selected" : ""}>Bank</option>
+          <option value="phonepe" ${isEdit && existing.payment_mode === "phonepe" ? "selected" : ""}>PhonePe</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="payRemark">Remark (optional)</label>
+        <input class="input" id="payRemark" value="${isEdit ? escapeHtml(existing.remark || "") : ""}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="savePaymentBtn">${isEdit ? "Save changes" : "Add payment"}</button>
+    `,
+    onOpen: () => {
+      document.getElementById("savePaymentBtn").onclick = () => savePayment(existing);
+      document.getElementById("payCreditor").onchange = (e) => {
+        document.getElementById("payDue").innerHTML = dueDisplayHtml(e.target.value);
+      };
+    }
+  });
+}
+
+async function savePayment(existing) {
+  const voucher_no = document.getElementById("payNo").value.trim();
+  const payment_date = document.getElementById("payDate").value;
+  const creditor_id = document.getElementById("payCreditor").value;
+  const amount = parseFloat(document.getElementById("payAmount").value);
+  const payment_mode = document.getElementById("payMode").value;
+  const remark = document.getElementById("payRemark").value.trim();
+
+  let ok = true;
+  const noErr = document.getElementById("payNoErr");
+  const amtErr = document.getElementById("payAmountErr");
+  if (!voucher_no) { noErr.classList.add("show"); ok = false; } else { noErr.classList.remove("show"); }
+  if (!amount || amount <= 0) { amtErr.classList.add("show"); ok = false; } else { amtErr.classList.remove("show"); }
+  if (!ok) return;
+
+  const btn = document.getElementById("savePaymentBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const payload = { voucher_no, payment_date, creditor_id, amount, payment_mode, remark: remark || null };
+
+  if (existing) {
+    const record = await withAuditStamp(payload, { isNew: false });
+    const { error } = await supabaseClient.from("creditor_payments").update(record).eq("payment_id", existing.payment_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Save changes"; return; }
+    await logAudit("creditor_payments", existing.payment_id, "update", existing, record);
+    showToast("Payment updated.", "success");
+  } else {
+    const record = await withAuditStamp(payload, { isNew: true });
+    const { data, error } = await supabaseClient.from("creditor_payments").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Add payment"; return; }
+    await logAudit("creditor_payments", data.payment_id, "insert", null, record);
+    showToast("Payment added.", "success");
+  }
+
+  closeModal();
+  await loadBalances();
+  await loadPayments();
+}
+
+function confirmDeletePayment(id) {
+  openModal({
+    title: "Delete payment?",
+    subtitle: "This cannot be undone and will increase the creditor's total due.",
+    bodyHtml: `<p>Delete this creditor payment?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelPaymentBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelPaymentBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("creditor_payments").delete().eq("payment_id", id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("creditor_payments", id, "delete", null, null);
+        closeModal();
+        showToast("Payment deleted.", "success");
+        await loadBalances();
+        await loadPayments();
+      };
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
