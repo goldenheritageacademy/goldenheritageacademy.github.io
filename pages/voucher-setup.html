@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voucher Setup — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+</head>
+<body>
+
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Accounts</span>
+    <h1>Voucher Setup</h1>
+    <p>Manage the Heads, Categories and Creditors used across cash and creditor vouchers.</p>
+  </div>
+
+  <!-- HEADS -->
+  <div class="card" style="margin-bottom:20px;">
+    <div class="page-header" style="margin-bottom:12px;">
+      <h2 style="margin:0;">Heads</h2>
+      <button class="btn btn-primary btn-sm" id="addHeadBtn" style="display:none;">+ Add Head</button>
+    </div>
+    <div class="table-wrap" id="headsArea">
+      <div class="skeleton" style="height:18px;"></div>
+    </div>
+  </div>
+
+  <!-- CATEGORIES -->
+  <div class="card" style="margin-bottom:20px;">
+    <div class="page-header" style="margin-bottom:12px;">
+      <h2 style="margin:0;">Categories</h2>
+      <button class="btn btn-primary btn-sm" id="addCategoryBtn" style="display:none;">+ Add Category</button>
+    </div>
+    <div class="table-wrap" id="categoriesArea">
+      <div class="skeleton" style="height:18px;"></div>
+    </div>
+  </div>
+
+  <!-- CREDITORS -->
+  <div class="card">
+    <div class="page-header" style="margin-bottom:12px;">
+      <h2 style="margin:0;">Creditors</h2>
+      <button class="btn btn-primary btn-sm" id="addCreditorBtn" style="display:none;">+ Add Creditor</button>
+    </div>
+    <div class="table-wrap" id="creditorsArea">
+      <div class="skeleton" style="height:18px;"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "voucher-setup"; // must match menu.js id
+let myAccess = null;
+
+let headsCache = [];
+let categoriesCache = [];
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  if (myAccess.level === "full" || myAccess.level === "limited") {
+    document.getElementById("addHeadBtn").style.display = "inline-flex";
+    document.getElementById("addCategoryBtn").style.display = "inline-flex";
+    document.getElementById("addCreditorBtn").style.display = "inline-flex";
+  }
+  document.getElementById("addHeadBtn").onclick = () => openHeadModal(null);
+  document.getElementById("addCategoryBtn").onclick = () => openCategoryModal(null);
+  document.getElementById("addCreditorBtn").onclick = () => openCreditorModal(null);
+
+  await loadHeads();
+  await loadCategories();
+  await loadCreditors();
+}
+
+/* ============================= HEADS ============================= */
+
+async function loadHeads() {
+  const { data, error } = await supabaseClient
+    .from("voucher_heads")
+    .select("*")
+    .order("name", { ascending: true });
+
+  const area = document.getElementById("headsArea");
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Failed to load heads.</p></div>`; return; }
+  headsCache = data || [];
+
+  if (!headsCache.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">🗂️</div><p>No heads yet.</p></div>`;
+    return;
+  }
+
+  const canEdit = myAccess.level === "full";
+  area.innerHTML = `
+    <table class="data">
+      <thead><tr><th>Head Name</th><th style="width:140px;"></th></tr></thead>
+      <tbody>
+        ${headsCache.map(h => `
+          <tr>
+            <td>${escapeHtml(h.name)}</td>
+            <td>
+              ${canEdit ? `
+                <button class="btn btn-ghost btn-sm" onclick='openHeadModal(${JSON.stringify(h)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick='confirmDeleteHead("${h.head_id}", ${JSON.stringify(h.name)})'>Delete</button>
+              ` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function openHeadModal(existing) {
+  const isEdit = !!existing;
+  openModal({
+    title: isEdit ? "Edit head" : "Add head",
+    subtitle: isEdit ? "Update the head name" : "e.g. School, Hostel, Infrastructure",
+    bodyHtml: `
+      <div class="field">
+        <label for="hName">Head name</label>
+        <input class="input" id="hName" value="${isEdit ? escapeHtml(existing.name) : ""}" />
+        <div class="field-error" id="hNameErr">Head name is required.</div>
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveHeadBtn">${isEdit ? "Save changes" : "Add head"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveHeadBtn").onclick = () => saveHead(existing); }
+  });
+}
+
+async function saveHead(existing) {
+  const name = document.getElementById("hName").value.trim();
+  const errEl = document.getElementById("hNameErr");
+  if (!name) { errEl.classList.add("show"); return; }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("saveHeadBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  if (existing) {
+    const record = await withAuditStamp({ name }, { isNew: false });
+    const { error } = await supabaseClient.from("voucher_heads").update(record).eq("head_id", existing.head_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Save changes"; return; }
+    await logAudit("voucher_heads", existing.head_id, "update", existing, record);
+    showToast("Head updated.", "success");
+  } else {
+    const record = await withAuditStamp({ name }, { isNew: true });
+    const { data, error } = await supabaseClient.from("voucher_heads").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Add head"; return; }
+    await logAudit("voucher_heads", data.head_id, "insert", null, record);
+    showToast("Head added.", "success");
+  }
+
+  closeModal();
+  await loadHeads();
+  await loadCategories();
+}
+
+function confirmDeleteHead(id, label) {
+  openModal({
+    title: "Delete head?",
+    subtitle: "This cannot be undone. Categories under this head must be removed first.",
+    bodyHtml: `<p>Delete "<strong>${escapeHtml(label)}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelHeadBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelHeadBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("voucher_heads").delete().eq("head_id", id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("voucher_heads", id, "delete", { name: label }, null);
+        closeModal();
+        showToast("Head deleted.", "success");
+        await loadHeads();
+      };
+    }
+  });
+}
+
+/* ============================ CATEGORIES ============================ */
+
+async function loadCategories() {
+  const { data, error } = await supabaseClient
+    .from("voucher_categories")
+    .select("*, voucher_heads(name)")
+    .order("name", { ascending: true });
+
+  const area = document.getElementById("categoriesArea");
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Failed to load categories.</p></div>`; return; }
+  categoriesCache = data || [];
+
+  if (!categoriesCache.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">📁</div><p>No categories yet.</p></div>`;
+    return;
+  }
+
+  const canEdit = myAccess.level === "full";
+  area.innerHTML = `
+    <table class="data">
+      <thead><tr><th>Category</th><th>Head</th><th style="width:140px;"></th></tr></thead>
+      <tbody>
+        ${categoriesCache.map(c => `
+          <tr>
+            <td>${escapeHtml(c.name)}</td>
+            <td>${escapeHtml(c.voucher_heads ? c.voucher_heads.name : "")}</td>
+            <td>
+              ${canEdit ? `
+                <button class="btn btn-ghost btn-sm" onclick='openCategoryModal(${JSON.stringify(c)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick='confirmDeleteCategory("${c.category_id}", ${JSON.stringify(c.name)})'>Delete</button>
+              ` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function openCategoryModal(existing) {
+  const isEdit = !!existing;
+  if (!headsCache.length) { showToast("Add a head first.", "error"); return; }
+
+  openModal({
+    title: isEdit ? "Edit category" : "Add category",
+    subtitle: isEdit ? "Update the category" : "e.g. Canteen, Dress, Printing",
+    bodyHtml: `
+      <div class="field">
+        <label for="cHead">Head</label>
+        <select class="input" id="cHead">
+          ${headsCache.map(h => `<option value="${h.head_id}" ${isEdit && existing.head_id === h.head_id ? "selected" : ""}>${escapeHtml(h.name)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label for="cName">Category name</label>
+        <input class="input" id="cName" value="${isEdit ? escapeHtml(existing.name) : ""}" />
+        <div class="field-error" id="cNameErr">Category name is required.</div>
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveCategoryBtn">${isEdit ? "Save changes" : "Add category"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveCategoryBtn").onclick = () => saveCategory(existing); }
+  });
+}
+
+async function saveCategory(existing) {
+  const head_id = document.getElementById("cHead").value;
+  const name = document.getElementById("cName").value.trim();
+  const errEl = document.getElementById("cNameErr");
+  if (!name) { errEl.classList.add("show"); return; }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("saveCategoryBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  if (existing) {
+    const record = await withAuditStamp({ head_id, name }, { isNew: false });
+    const { error } = await supabaseClient.from("voucher_categories").update(record).eq("category_id", existing.category_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Save changes"; return; }
+    await logAudit("voucher_categories", existing.category_id, "update", existing, record);
+    showToast("Category updated.", "success");
+  } else {
+    const record = await withAuditStamp({ head_id, name }, { isNew: true });
+    const { data, error } = await supabaseClient.from("voucher_categories").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Add category"; return; }
+    await logAudit("voucher_categories", data.category_id, "insert", null, record);
+    showToast("Category added.", "success");
+  }
+
+  closeModal();
+  await loadCategories();
+  await loadCreditors();
+}
+
+function confirmDeleteCategory(id, label) {
+  openModal({
+    title: "Delete category?",
+    subtitle: "This cannot be undone. Creditors under this category must be removed first.",
+    bodyHtml: `<p>Delete "<strong>${escapeHtml(label)}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelCategoryBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelCategoryBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("voucher_categories").delete().eq("category_id", id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("voucher_categories", id, "delete", { name: label }, null);
+        closeModal();
+        showToast("Category deleted.", "success");
+        await loadCategories();
+      };
+    }
+  });
+}
+
+/* ============================ CREDITORS ============================ */
+
+async function loadCreditors() {
+  const { data, error } = await supabaseClient
+    .from("creditors")
+    .select("*, voucher_categories(name, head_id, voucher_heads(name))")
+    .order("name", { ascending: true });
+
+  const area = document.getElementById("creditorsArea");
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Failed to load creditors.</p></div>`; return; }
+  const creditors = data || [];
+
+  if (!creditors.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">🧾</div><p>No creditors yet.</p></div>`;
+    return;
+  }
+
+  const canEdit = myAccess.level === "full";
+  area.innerHTML = `
+    <table class="data">
+      <thead><tr><th>Creditor</th><th>Category</th><th>Head</th><th>Opening Balance</th><th style="width:140px;"></th></tr></thead>
+      <tbody>
+        ${creditors.map(c => `
+          <tr>
+            <td>${escapeHtml(c.name)}</td>
+            <td>${escapeHtml(c.voucher_categories ? c.voucher_categories.name : "")}</td>
+            <td>${escapeHtml(c.voucher_categories && c.voucher_categories.voucher_heads ? c.voucher_categories.voucher_heads.name : "")}</td>
+            <td>₹${Number(c.opening_balance).toFixed(2)}</td>
+            <td>
+              ${canEdit ? `
+                <button class="btn btn-ghost btn-sm" onclick='openCreditorModal(${JSON.stringify(c)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick='confirmDeleteCreditor("${c.creditor_id}", ${JSON.stringify(c.name)})'>Delete</button>
+              ` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function openCreditorModal(existing) {
+  const isEdit = !!existing;
+  if (!categoriesCache.length) { showToast("Add a category first.", "error"); return; }
+
+  openModal({
+    title: isEdit ? "Edit creditor" : "Add creditor",
+    subtitle: isEdit ? "Update the creditor" : "Optional creditor under a category",
+    bodyHtml: `
+      <div class="field">
+        <label for="crCategory">Category</label>
+        <select class="input" id="crCategory">
+          ${categoriesCache.map(c => `<option value="${c.category_id}" ${isEdit && existing.category_id === c.category_id ? "selected" : ""}>${escapeHtml(c.name)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label for="crName">Creditor name</label>
+        <input class="input" id="crName" value="${isEdit ? escapeHtml(existing.name) : ""}" />
+        <div class="field-error" id="crNameErr">Creditor name is required.</div>
+      </div>
+      <div class="field">
+        <label for="crOpening">Opening balance</label>
+        <input class="input" id="crOpening" type="number" step="0.01" value="${isEdit ? existing.opening_balance : "0"}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveCreditorBtn">${isEdit ? "Save changes" : "Add creditor"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveCreditorBtn").onclick = () => saveCreditor(existing); }
+  });
+}
+
+async function saveCreditor(existing) {
+  const category_id = document.getElementById("crCategory").value;
+  const name = document.getElementById("crName").value.trim();
+  const opening_balance = parseFloat(document.getElementById("crOpening").value || "0");
+  const errEl = document.getElementById("crNameErr");
+  if (!name) { errEl.classList.add("show"); return; }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("saveCreditorBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  if (existing) {
+    const record = await withAuditStamp({ category_id, name, opening_balance }, { isNew: false });
+    const { error } = await supabaseClient.from("creditors").update(record).eq("creditor_id", existing.creditor_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Save changes"; return; }
+    await logAudit("creditors", existing.creditor_id, "update", existing, record);
+    showToast("Creditor updated.", "success");
+  } else {
+    const record = await withAuditStamp({ category_id, name, opening_balance }, { isNew: true });
+    const { data, error } = await supabaseClient.from("creditors").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Add creditor"; return; }
+    await logAudit("creditors", data.creditor_id, "insert", null, record);
+    showToast("Creditor added.", "success");
+  }
+
+  closeModal();
+  await loadCreditors();
+}
+
+function confirmDeleteCreditor(id, label) {
+  openModal({
+    title: "Delete creditor?",
+    subtitle: "This cannot be undone. Purchases/payments linked to this creditor must be removed first.",
+    bodyHtml: `<p>Delete "<strong>${escapeHtml(label)}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelCreditorBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelCreditorBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("creditors").delete().eq("creditor_id", id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("creditors", id, "delete", { name: label }, null);
+        closeModal();
+        showToast("Creditor deleted.", "success");
+        await loadCreditors();
+      };
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
