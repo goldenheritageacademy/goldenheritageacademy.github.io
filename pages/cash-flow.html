@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cash Flow — Greenfield High Portal</title>
+
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+
+<style>
+  /* Page-specific only — everything else comes from common.css */
+  .cf-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .cf-tab-btn {
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--brass);
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .cf-tab-btn.active {
+    background: var(--brass);
+    color: #fff;
+  }
+  .cf-panel { display: none; }
+  .cf-panel.active { display: block; }
+
+  .cf-balances {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .cf-balance-card {
+    padding: 14px 16px;
+  }
+  .cf-balance-card .label {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .cf-balance-card .value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-top: 4px;
+  }
+  .cf-amount-in { color: #1a7d3c; }
+  .cf-amount-out { color: #b3261e; }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Finance</span>
+      <h1>Cash Flow</h1>
+    </div>
+    <button class="btn btn-primary" id="addBtn" style="display:none;">+ Add</button>
+  </div>
+
+  <!-- Account balance summary — always visible regardless of active tab -->
+  <div class="cf-balances">
+    <div class="card cf-balance-card">
+      <div class="label">Cash Account</div>
+      <div class="value" id="balCash">—</div>
+    </div>
+    <div class="card cf-balance-card">
+      <div class="label">Bank Account</div>
+      <div class="value" id="balBank">—</div>
+    </div>
+    <div class="card cf-balance-card">
+      <div class="label">PhonePe Account</div>
+      <div class="value" id="balPhonepe">—</div>
+    </div>
+  </div>
+
+  <div class="cf-tabs">
+    <button class="cf-tab-btn active" data-tab="inflow">Cash Inflow</button>
+    <button class="cf-tab-btn" data-tab="outflow">Cash Outflow</button>
+    <button class="cf-tab-btn" data-tab="transfer">Fund Transfer</button>
+    <button class="cf-tab-btn" data-tab="categories">Categories</button>
+  </div>
+
+  <!-- CASH INFLOW -->
+  <div class="cf-panel active" id="panel-inflow">
+    <div class="card">
+      <div class="table-wrap">
+        <table class="data" id="inflowTable">
+          <thead>
+            <tr><th>Date</th><th>Category</th><th>Amount</th><th>Description</th><th></th></tr>
+          </thead>
+          <tbody id="inflowBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="inflowEmpty" style="display:none;">
+        <div class="icon">💰</div><p>No cash inflow records yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- CASH OUTFLOW -->
+  <div class="cf-panel" id="panel-outflow">
+    <div class="card">
+      <div class="table-wrap">
+        <table class="data" id="outflowTable">
+          <thead>
+            <tr><th>Date</th><th>Category</th><th>Amount</th><th>Description</th><th></th></tr>
+          </thead>
+          <tbody id="outflowBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="outflowEmpty" style="display:none;">
+        <div class="icon">🧾</div><p>No cash outflow records yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- FUND TRANSFER -->
+  <div class="cf-panel" id="panel-transfer">
+    <div class="card">
+      <div class="table-wrap">
+        <table class="data" id="transferTable">
+          <thead>
+            <tr><th>Date</th><th>From</th><th>To</th><th>Amount</th><th>Description</th><th></th></tr>
+          </thead>
+          <tbody id="transferBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="transferEmpty" style="display:none;">
+        <div class="icon">🔄</div><p>No fund transfers yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- CATEGORIES -->
+  <div class="cf-panel" id="panel-categories">
+    <div class="card">
+      <div class="table-wrap">
+        <table class="data" id="categoryTable">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th></th></tr>
+          </thead>
+          <tbody id="categoryBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="categoryEmpty" style="display:none;">
+        <div class="icon">🏷️</div><p>No categories yet.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "cash-flow"; // must match menu.js id
+let myAccess = null;
+let activeTab = "inflow";
+let allCategories = []; // cache of all rows from cash_flow_categories
+
+const ACCOUNT_LABELS = { cash: "Cash", bank: "Bank", phonepe: "PhonePe" };
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return; // requireActiveUser() already showed a message
+
+  document.querySelectorAll(".cf-tab-btn").forEach(btn => {
+    btn.onclick = () => switchTab(btn.dataset.tab);
+  });
+
+  if (myAccess.level === "full" || myAccess.level === "limited") {
+    document.getElementById("addBtn").style.display = "inline-flex";
+  }
+  updateAddButton();
+  document.getElementById("addBtn").onclick = () => openAddModalForActiveTab();
+
+  await loadCategories();
+  await Promise.all([loadInflow(), loadOutflow(), loadTransfers(), loadCategoryList()]);
+  await loadBalances();
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll(".cf-tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+  });
+  document.querySelectorAll(".cf-panel").forEach(panel => {
+    panel.classList.toggle("active", panel.id === "panel-" + tab);
+  });
+  updateAddButton();
+}
+
+function updateAddButton() {
+  const labels = {
+    inflow: "+ Add Cash Inflow",
+    outflow: "+ Add Cash Outflow",
+    transfer: "+ Add Fund Transfer",
+    categories: "+ Add Category"
+  };
+  document.getElementById("addBtn").textContent = labels[activeTab];
+}
+
+function openAddModalForActiveTab() {
+  if (activeTab === "inflow") openInflowModal(null);
+  else if (activeTab === "outflow") openOutflowModal(null);
+  else if (activeTab === "transfer") openTransferModal(null);
+  else if (activeTab === "categories") openCategoryModal(null);
+}
+
+/* ------------------------------------------------------------------ */
+/* Categories                                                          */
+/* ------------------------------------------------------------------ */
+
+async function loadCategories() {
+  const { data, error } = await supabaseClient
+    .from("cash_flow_categories")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) { showToast("Failed to load categories: " + error.message, "error"); return; }
+  allCategories = data || [];
+}
+
+function categoryOptionsHtml(type, selectedId) {
+  const opts = allCategories.filter(c => c.type === type);
+  if (opts.length === 0) {
+    return `<option value="">No categories yet — add one in the Categories tab</option>`;
+  }
+  return opts.map(c =>
+    `<option value="${c.category_id}" ${selectedId === c.category_id ? "selected" : ""}>${escapeHtml(c.name)}</option>`
+  ).join("");
+}
+
+function categoryName(id) {
+  const c = allCategories.find(c => c.category_id === id);
+  return c ? c.name : "—";
+}
+
+function openCategoryModal(existing) {
+  const isEdit = !!existing;
+  openModal({
+    title: isEdit ? "Edit category" : "Add category",
+    subtitle: isEdit ? "Update the category details" : "Create a category for cash inflow or outflow",
+    bodyHtml: `
+      <div class="field">
+        <label for="catName">Name</label>
+        <input class="input" id="catName" value="${isEdit ? escapeHtml(existing.name) : ""}" />
+        <div class="field-error" id="catNameErr">Name is required.</div>
+      </div>
+      <div class="field">
+        <label for="catType">Type</label>
+        <select class="input" id="catType">
+          <option value="inflow" ${isEdit && existing.type === "inflow" ? "selected" : ""}>Cash Inflow</option>
+          <option value="outflow" ${isEdit && existing.type === "outflow" ? "selected" : ""}>Cash Outflow</option>
+        </select>
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveCatBtn">${isEdit ? "Save changes" : "Add category"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveCatBtn").onclick = () => saveCategory(existing); }
+  });
+}
+
+async function saveCategory(existing) {
+  const name = document.getElementById("catName").value.trim();
+  const type = document.getElementById("catType").value;
+  const errEl = document.getElementById("catNameErr");
+  if (!name) { errEl.classList.add("show"); return; }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("saveCatBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  if (existing) {
+    const record = await withAuditStamp({ name, type }, { isNew: false });
+    const { error } = await supabaseClient.from("cash_flow_categories").update(record).eq("category_id", existing.category_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); return; }
+    await logAudit("cash_flow_categories", existing.category_id, "update", existing, record);
+    showToast("Category updated.", "success");
+  } else {
+    const record = await withAuditStamp({ name, type }, { isNew: true });
+    const { data, error } = await supabaseClient.from("cash_flow_categories").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); return; }
+    await logAudit("cash_flow_categories", data.category_id, "insert", null, record);
+    showToast("Category added.", "success");
+  }
+
+  closeModal();
+  await loadCategories();
+  await loadCategoryList();
+}
+
+function confirmDeleteCategory(cat) {
+  openModal({
+    title: "Delete category?",
+    subtitle: "This cannot be undone. Existing inflow/outflow entries using it will keep the old category name only in history.",
+    bodyHtml: `<p>Delete "<strong>${escapeHtml(cat.name)}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelCatBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelCatBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("cash_flow_categories").delete().eq("category_id", cat.category_id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("cash_flow_categories", cat.category_id, "delete", cat, null);
+        closeModal();
+        showToast("Category deleted.", "success");
+        await loadCategories();
+        await loadCategoryList();
+      };
+    }
+  });
+}
+
+async function loadCategoryList() {
+  const body = document.getElementById("categoryBody");
+  const empty = document.getElementById("categoryEmpty");
+  if (allCategories.length === 0) {
+    body.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  const canEdit = myAccess.level === "full";
+  body.innerHTML = allCategories.map(c => `
+    <tr>
+      <td>${escapeHtml(c.name)}</td>
+      <td><span class="badge ${c.type === "inflow" ? "badge-success" : "badge-danger"}">${c.type === "inflow" ? "Inflow" : "Outflow"}</span></td>
+      <td>
+        ${canEdit ? `
+          <button class="btn btn-ghost btn-sm" onclick='openCategoryModal(${JSON.stringify(c)})'>Edit</button>
+          <button class="btn btn-danger btn-sm" onclick='confirmDeleteCategory(${JSON.stringify(c)})'>Delete</button>
+        ` : ""}
+      </td>
+    </tr>
+  `).join("");
+}
+
+/* ------------------------------------------------------------------ */
+/* Cash Inflow                                                         */
+/* ------------------------------------------------------------------ */
+
+function openInflowModal(existing) {
+  const isEdit = !!existing;
+  openModal({
+    title: isEdit ? "Edit cash inflow" : "Add cash inflow",
+    subtitle: isEdit ? "Update the details below" : "Record money coming into the cash account",
+    bodyHtml: `
+      <div class="field">
+        <label for="inDate">Date</label>
+        <input class="input" type="date" id="inDate" value="${isEdit ? existing.txn_date : new Date().toISOString().slice(0,10)}" />
+        <div class="field-error" id="inDateErr">Date is required.</div>
+      </div>
+      <div class="field">
+        <label for="inCategory">Category</label>
+        <select class="input" id="inCategory">${categoryOptionsHtml("inflow", isEdit ? existing.category_id : null)}</select>
+        <div class="field-error" id="inCategoryErr">Category is required.</div>
+      </div>
+      <div class="field">
+        <label for="inAmount">Amount</label>
+        <input class="input" type="number" step="0.01" min="0.01" id="inAmount" value="${isEdit ? existing.amount : ""}" />
+        <div class="field-error" id="inAmountErr">Enter a valid amount.</div>
+      </div>
+      <div class="field">
+        <label for="inDesc">Description</label>
+        <input class="input" id="inDesc" value="${isEdit ? escapeHtml(existing.description || "") : ""}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveInBtn">${isEdit ? "Save changes" : "Add inflow"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveInBtn").onclick = () => saveInflow(existing); }
+  });
+}
+
+async function saveInflow(existing) {
+  const txn_date = document.getElementById("inDate").value;
+  const category_id = document.getElementById("inCategory").value;
+  const amount = parseFloat(document.getElementById("inAmount").value);
+  const description = document.getElementById("inDesc").value.trim();
+
+  let ok = true;
+  if (!txn_date) { document.getElementById("inDateErr").classList.add("show"); ok = false; }
+  else document.getElementById("inDateErr").classList.remove("show");
+  if (!category_id) { document.getElementById("inCategoryErr").classList.add("show"); ok = false; }
+  else document.getElementById("inCategoryErr").classList.remove("show");
+  if (!amount || amount <= 0) { document.getElementById("inAmountErr").classList.add("show"); ok = false; }
+  else document.getElementById("inAmountErr").classList.remove("show");
+  if (!ok) return;
+
+  const btn = document.getElementById("saveInBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const payload = { txn_date, category_id, amount, description };
+
+  if (existing) {
+    const record = await withAuditStamp(payload, { isNew: false });
+    const { error } = await supabaseClient.from("cash_inflow").update(record).eq("cash_inflow_id", existing.cash_inflow_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); return; }
+    await logAudit("cash_inflow", existing.cash_inflow_id, "update", existing, record);
+    showToast("Cash inflow updated.", "success");
+  } else {
+    const record = await withAuditStamp(payload, { isNew: true });
+    const { data, error } = await supabaseClient.from("cash_inflow").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); return; }
+    await logAudit("cash_inflow", data.cash_inflow_id, "insert", null, record);
+    showToast("Cash inflow added.", "success");
+  }
+
+  closeModal();
+  await loadInflow();
+  await loadBalances();
+}
+
+function confirmDeleteInflow(row) {
+  openModal({
+    title: "Delete cash inflow?",
+    subtitle: "This cannot be undone.",
+    bodyHtml: `<p>Delete this ${escapeHtml(String(row.amount))} entry dated ${escapeHtml(row.txn_date)}?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelInBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelInBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("cash_inflow").delete().eq("cash_inflow_id", row.cash_inflow_id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("cash_inflow", row.cash_inflow_id, "delete", row, null);
+        closeModal();
+        showToast("Cash inflow deleted.", "success");
+        await loadInflow();
+        await loadBalances();
+      };
+    }
+  });
+}
+
+async function loadInflow() {
+  const { data, error } = await supabaseClient
+    .from("cash_inflow")
+    .select("*")
+    .order("txn_date", { ascending: false });
+  if (error) { showToast("Failed to load cash inflow: " + error.message, "error"); return; }
+
+  const body = document.getElementById("inflowBody");
+  const empty = document.getElementById("inflowEmpty");
+  if (!data || data.length === 0) { body.innerHTML = ""; empty.style.display = "block"; return; }
+  empty.style.display = "none";
+  const canEdit = myAccess.level === "full";
+  body.innerHTML = data.map(row => `
+    <tr>
+      <td>${formatDateTime(row.txn_date)}</td>
+      <td>${escapeHtml(categoryName(row.category_id))}</td>
+      <td class="cf-amount-in">₹${Number(row.amount).toFixed(2)}</td>
+      <td>${escapeHtml(row.description || "")}</td>
+      <td>
+        ${canEdit ? `
+          <button class="btn btn-ghost btn-sm" onclick='openInflowModal(${JSON.stringify(row)})'>Edit</button>
+          <button class="btn btn-danger btn-sm" onclick='confirmDeleteInflow(${JSON.stringify(row)})'>Delete</button>
+        ` : ""}
+      </td>
+    </tr>
+  `).join("");
+}
+
+/* ------------------------------------------------------------------ */
+/* Cash Outflow (mirrors Cash Inflow)                                   */
+/* ------------------------------------------------------------------ */
+
+function openOutflowModal(existing) {
+  const isEdit = !!existing;
+  openModal({
+    title: isEdit ? "Edit cash outflow" : "Add cash outflow",
+    subtitle: isEdit ? "Update the details below" : "Record money going out of the cash account",
+    bodyHtml: `
+      <div class="field">
+        <label for="outDate">Date</label>
+        <input class="input" type="date" id="outDate" value="${isEdit ? existing.txn_date : new Date().toISOString().slice(0,10)}" />
+        <div class="field-error" id="outDateErr">Date is required.</div>
+      </div>
+      <div class="field">
+        <label for="outCategory">Category</label>
+        <select class="input" id="outCategory">${categoryOptionsHtml("outflow", isEdit ? existing.category_id : null)}</select>
+        <div class="field-error" id="outCategoryErr">Category is required.</div>
+      </div>
+      <div class="field">
+        <label for="outAmount">Amount</label>
+        <input class="input" type="number" step="0.01" min="0.01" id="outAmount" value="${isEdit ? existing.amount : ""}" />
+        <div class="field-error" id="outAmountErr">Enter a valid amount.</div>
+      </div>
+      <div class="field">
+        <label for="outDesc">Description</label>
+        <input class="input" id="outDesc" value="${isEdit ? escapeHtml(existing.description || "") : ""}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveOutBtn">${isEdit ? "Save changes" : "Add outflow"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveOutBtn").onclick = () => saveOutflow(existing); }
+  });
+}
+
+async function saveOutflow(existing) {
+  const txn_date = document.getElementById("outDate").value;
+  const category_id = document.getElementById("outCategory").value;
+  const amount = parseFloat(document.getElementById("outAmount").value);
+  const description = document.getElementById("outDesc").value.trim();
+
+  let ok = true;
+  if (!txn_date) { document.getElementById("outDateErr").classList.add("show"); ok = false; }
+  else document.getElementById("outDateErr").classList.remove("show");
+  if (!category_id) { document.getElementById("outCategoryErr").classList.add("show"); ok = false; }
+  else document.getElementById("outCategoryErr").classList.remove("show");
+  if (!amount || amount <= 0) { document.getElementById("outAmountErr").classList.add("show"); ok = false; }
+  else document.getElementById("outAmountErr").classList.remove("show");
+  if (!ok) return;
+
+  const btn = document.getElementById("saveOutBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const payload = { txn_date, category_id, amount, description };
+
+  if (existing) {
+    const record = await withAuditStamp(payload, { isNew: false });
+    const { error } = await supabaseClient.from("cash_outflow").update(record).eq("cash_outflow_id", existing.cash_outflow_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); return; }
+    await logAudit("cash_outflow", existing.cash_outflow_id, "update", existing, record);
+    showToast("Cash outflow updated.", "success");
+  } else {
+    const record = await withAuditStamp(payload, { isNew: true });
+    const { data, error } = await supabaseClient.from("cash_outflow").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); return; }
+    await logAudit("cash_outflow", data.cash_outflow_id, "insert", null, record);
+    showToast("Cash outflow added.", "success");
+  }
+
+  closeModal();
+  await loadOutflow();
+  await loadBalances();
+}
+
+function confirmDeleteOutflow(row) {
+  openModal({
+    title: "Delete cash outflow?",
+    subtitle: "This cannot be undone.",
+    bodyHtml: `<p>Delete this ${escapeHtml(String(row.amount))} entry dated ${escapeHtml(row.txn_date)}?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelOutBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelOutBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("cash_outflow").delete().eq("cash_outflow_id", row.cash_outflow_id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("cash_outflow", row.cash_outflow_id, "delete", row, null);
+        closeModal();
+        showToast("Cash outflow deleted.", "success");
+        await loadOutflow();
+        await loadBalances();
+      };
+    }
+  });
+}
+
+async function loadOutflow() {
+  const { data, error } = await supabaseClient
+    .from("cash_outflow")
+    .select("*")
+    .order("txn_date", { ascending: false });
+  if (error) { showToast("Failed to load cash outflow: " + error.message, "error"); return; }
+
+  const body = document.getElementById("outflowBody");
+  const empty = document.getElementById("outflowEmpty");
+  if (!data || data.length === 0) { body.innerHTML = ""; empty.style.display = "block"; return; }
+  empty.style.display = "none";
+  const canEdit = myAccess.level === "full";
+  body.innerHTML = data.map(row => `
+    <tr>
+      <td>${formatDateTime(row.txn_date)}</td>
+      <td>${escapeHtml(categoryName(row.category_id))}</td>
+      <td class="cf-amount-out">₹${Number(row.amount).toFixed(2)}</td>
+      <td>${escapeHtml(row.description || "")}</td>
+      <td>
+        ${canEdit ? `
+          <button class="btn btn-ghost btn-sm" onclick='openOutflowModal(${JSON.stringify(row)})'>Edit</button>
+          <button class="btn btn-danger btn-sm" onclick='confirmDeleteOutflow(${JSON.stringify(row)})'>Delete</button>
+        ` : ""}
+      </td>
+    </tr>
+  `).join("");
+}
+
+/* ------------------------------------------------------------------ */
+/* Fund Transfer                                                       */
+/* ------------------------------------------------------------------ */
+
+function accountOptionsHtml(selected) {
+  return Object.entries(ACCOUNT_LABELS).map(([val, label]) =>
+    `<option value="${val}" ${selected === val ? "selected" : ""}>${label}</option>`
+  ).join("");
+}
+
+function openTransferModal(existing) {
+  const isEdit = !!existing;
+  openModal({
+    title: isEdit ? "Edit fund transfer" : "Add fund transfer",
+    subtitle: isEdit ? "Update the details below" : "Move money between Cash, Bank and PhonePe accounts",
+    bodyHtml: `
+      <div class="field">
+        <label for="trDate">Date</label>
+        <input class="input" type="date" id="trDate" value="${isEdit ? existing.txn_date : new Date().toISOString().slice(0,10)}" />
+        <div class="field-error" id="trDateErr">Date is required.</div>
+      </div>
+      <div class="field">
+        <label for="trFrom">From account</label>
+        <select class="input" id="trFrom">${accountOptionsHtml(isEdit ? existing.from_account : "bank")}</select>
+      </div>
+      <div class="field">
+        <label for="trTo">To account</label>
+        <select class="input" id="trTo">${accountOptionsHtml(isEdit ? existing.to_account : "cash")}</select>
+        <div class="field-error" id="trAccountErr">From and To accounts must be different.</div>
+      </div>
+      <div class="field">
+        <label for="trAmount">Amount</label>
+        <input class="input" type="number" step="0.01" min="0.01" id="trAmount" value="${isEdit ? existing.amount : ""}" />
+        <div class="field-error" id="trAmountErr">Enter a valid amount.</div>
+      </div>
+      <div class="field">
+        <label for="trDesc">Description</label>
+        <input class="input" id="trDesc" value="${isEdit ? escapeHtml(existing.description || "") : ""}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveTrBtn">${isEdit ? "Save changes" : "Add transfer"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveTrBtn").onclick = () => saveTransfer(existing); }
+  });
+}
+
+async function saveTransfer(existing) {
+  const txn_date = document.getElementById("trDate").value;
+  const from_account = document.getElementById("trFrom").value;
+  const to_account = document.getElementById("trTo").value;
+  const amount = parseFloat(document.getElementById("trAmount").value);
+  const description = document.getElementById("trDesc").value.trim();
+
+  let ok = true;
+  if (!txn_date) { document.getElementById("trDateErr").classList.add("show"); ok = false; }
+  else document.getElementById("trDateErr").classList.remove("show");
+  if (from_account === to_account) { document.getElementById("trAccountErr").classList.add("show"); ok = false; }
+  else document.getElementById("trAccountErr").classList.remove("show");
+  if (!amount || amount <= 0) { document.getElementById("trAmountErr").classList.add("show"); ok = false; }
+  else document.getElementById("trAmountErr").classList.remove("show");
+  if (!ok) return;
+
+  const btn = document.getElementById("saveTrBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const payload = { txn_date, from_account, to_account, amount, description };
+
+  if (existing) {
+    const record = await withAuditStamp(payload, { isNew: false });
+    const { error } = await supabaseClient.from("fund_transfers").update(record).eq("fund_transfer_id", existing.fund_transfer_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); return; }
+    await logAudit("fund_transfers", existing.fund_transfer_id, "update", existing, record);
+    showToast("Fund transfer updated.", "success");
+  } else {
+    const record = await withAuditStamp(payload, { isNew: true });
+    const { data, error } = await supabaseClient.from("fund_transfers").insert(record).select().single();
+    if (error) { showToast("Add failed: " + error.message, "error"); return; }
+    await logAudit("fund_transfers", data.fund_transfer_id, "insert", null, record);
+    showToast("Fund transfer added.", "success");
+  }
+
+  closeModal();
+  await loadTransfers();
+  await loadBalances();
+}
+
+function confirmDeleteTransfer(row) {
+  openModal({
+    title: "Delete fund transfer?",
+    subtitle: "This cannot be undone.",
+    bodyHtml: `<p>Delete this ₹${Number(row.amount).toFixed(2)} transfer from ${ACCOUNT_LABELS[row.from_account]} to ${ACCOUNT_LABELS[row.to_account]}?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelTrBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelTrBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("fund_transfers").delete().eq("fund_transfer_id", row.fund_transfer_id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("fund_transfers", row.fund_transfer_id, "delete", row, null);
+        closeModal();
+        showToast("Fund transfer deleted.", "success");
+        await loadTransfers();
+        await loadBalances();
+      };
+    }
+  });
+}
+
+async function loadTransfers() {
+  const { data, error } = await supabaseClient
+    .from("fund_transfers")
+    .select("*")
+    .order("txn_date", { ascending: false });
+  if (error) { showToast("Failed to load fund transfers: " + error.message, "error"); return; }
+
+  const body = document.getElementById("transferBody");
+  const empty = document.getElementById("transferEmpty");
+  if (!data || data.length === 0) { body.innerHTML = ""; empty.style.display = "block"; return; }
+  empty.style.display = "none";
+  const canEdit = myAccess.level === "full";
+  body.innerHTML = data.map(row => `
+    <tr>
+      <td>${formatDateTime(row.txn_date)}</td>
+      <td>${ACCOUNT_LABELS[row.from_account]}</td>
+      <td>${ACCOUNT_LABELS[row.to_account]}</td>
+      <td>₹${Number(row.amount).toFixed(2)}</td>
+      <td>${escapeHtml(row.description || "")}</td>
+      <td>
+        ${canEdit ? `
+          <button class="btn btn-ghost btn-sm" onclick='openTransferModal(${JSON.stringify(row)})'>Edit</button>
+          <button class="btn btn-danger btn-sm" onclick='confirmDeleteTransfer(${JSON.stringify(row)})'>Delete</button>
+        ` : ""}
+      </td>
+    </tr>
+  `).join("");
+}
+
+/* ------------------------------------------------------------------ */
+/* Account balances                                                     */
+/* ------------------------------------------------------------------ */
+
+async function loadBalances() {
+  const { data, error } = await supabaseClient
+    .from("cash_flow_account_balances")
+    .select("*");
+  if (error) { showToast("Failed to load balances: " + error.message, "error"); return; }
+
+  const byAccount = {};
+  (data || []).forEach(r => byAccount[r.account] = r.balance);
+
+  document.getElementById("balCash").textContent = "₹" + Number(byAccount.cash || 0).toFixed(2);
+  document.getElementById("balBank").textContent = "₹" + Number(byAccount.bank || 0).toFixed(2);
+  document.getElementById("balPhonepe").textContent = "₹" + Number(byAccount.phonepe || 0).toFixed(2);
+}
+
+init();
+</script>
+</body>
+</html>
