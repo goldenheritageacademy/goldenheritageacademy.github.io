@@ -27,6 +27,16 @@ const MENU_ITEMS = [
   limitedAccess: ["editor", "viewer"],
   order: 10
 },
+   {
+  id: "payment",
+  label: "Payment",
+  icon: "💳",
+  file: "pages/payment.html",
+  group: "Accounts",
+  fullAccess: ["admin"],
+  limitedAccess: ["editor", "viewer"],
+  order: 8
+   },
 {
   id: "cash-voucher",
   label: "Cash Voucher",
