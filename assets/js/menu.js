@@ -99,6 +99,16 @@ const MENU_ITEMS = [
   order: 5
 },
    {
+  id: "cash-flow",
+  label: "Cash Flow",
+  icon: "💵",
+  file: "pages/cash-flow.html",
+  group: "Finance",
+  fullAccess: ["admin"],            // can add/edit/delete everything
+  limitedAccess: ["editor", "viewer"], // can add records, cannot edit/delete
+  order: 10                          // adjust to control menu position
+   },
+   {
   id: "staff",
   label: "Staff",
   icon: "🧑‍🏫",
