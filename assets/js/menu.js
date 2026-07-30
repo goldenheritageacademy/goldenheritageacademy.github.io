@@ -16,6 +16,16 @@ const MENU_ITEMS = [
     limitedAccess: [],                            // can read/enter only
     order: 1
   },
+     {
+    id: "dashboard-Report",                 // unique, matches the page's own pageId
+    label: "Dashboard Report",
+    icon: "🏠",
+    file: "pages/dash-report.html",    // path loaded into the iframe
+    group: "General",                // used to group items in the menu
+    fullAccess: ["admin", "editor", "viewer"],   // can edit/delete
+    limitedAccess: [],                            // can read/enter only
+    order: 1
+  },
    
 {
   id: "voucher-setup",
