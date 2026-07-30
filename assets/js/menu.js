@@ -37,7 +37,7 @@ const MENU_ITEMS = [
   limitedAccess: ["editor", "viewer"],
   order: 8
    },
-{
+/*{
   id: "cash-voucher",
   label: "Cash Voucher",
   icon: "💵",
@@ -46,7 +46,7 @@ const MENU_ITEMS = [
   fullAccess: ["admin"],
   limitedAccess: ["editor", "viewer"],
   order: 11
-},
+},*/
 {
   id: "creditor-voucher",
   label: "Creditor Voucher",
@@ -103,7 +103,7 @@ const MENU_ITEMS = [
   label: "Cash Flow",
   icon: "💵",
   file: "pages/cash-flow.html",
-  group: "Finance",
+  group: "Accounts",
   fullAccess: ["admin"],            // can add/edit/delete everything
   limitedAccess: ["editor", "viewer"], // can add records, cannot edit/delete
   order: 10                          // adjust to control menu position
@@ -118,7 +118,7 @@ const MENU_ITEMS = [
   limitedAccess: ["accountant", "manager"],
   order: 10
 },
-{
+/*{
   id: "salary-payment",
   label: "Salary Payment",
   icon: "💰",
@@ -127,7 +127,7 @@ const MENU_ITEMS = [
   fullAccess: ["admin"],
   limitedAccess: ["accountant", "manager"],
   order: 11
-},
+},*/
   {
     id: "manage-users",
     label: "Approve Users",
