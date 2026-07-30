@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Payment — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<!-- export libs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+  .tab-row { display:flex; gap:8px; margin:16px 0; }
+  .tab-btn { padding:8px 16px; border-radius:var(--radius-md); border:1px solid var(--ink); background:transparent; cursor:pointer; font-weight:600; }
+  .tab-btn.active { background:var(--ink); color:var(--paper); }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+  .type-pill-row { display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+  .type-pill { padding:10px 18px; border-radius:999px; border:1px solid var(--ink); cursor:pointer; background:transparent; font-weight:600; }
+  .type-pill.active { background:var(--brass); color:var(--ink); }
+  .voucher-status-box { padding:10px 14px; border-radius:var(--radius-md); margin:8px 0 16px; font-size:0.92em; }
+  .voucher-status-box.ok { background:#e7f6ec; border:1px solid #2e7d32; color:#1b5e20; }
+  .voucher-status-box.bad { background:#fdeaea; border:1px solid #c62828; color:#8e1b1b; }
+  .voucher-status-box.info { background:var(--paper); border:1px solid var(--ink); }
+  .filter-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; }
+  .due-box { padding:12px 16px; border-radius:var(--radius-md); background:var(--paper); border:1px solid var(--ink); margin:12px 0; }
+  .due-box strong { font-size:1.15em; }
+  .export-row { display:flex; gap:10px; margin:12px 0; }
+</style>
+</head>
+<body>
+
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Accounts</span>
+    <h1>Payment</h1>
+    <p>Enter cash, creditor, or salary vouchers through one form, backed by a single numbered voucher register.</p>
+  </div>
+
+  <div class="tab-row">
+    <button class="tab-btn active" id="tabNewBtn">New Payment</button>
+    <button class="tab-btn" id="tabViewBtn">Voucher Register</button>
+  </div>
+
+  <!-- ===================== NEW PAYMENT TAB ===================== -->
+  <div class="tab-panel active" id="tabNew">
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <h2 style="margin:0;">Voucher Range</h2>
+        <button class="btn btn-accent btn-sm" id="genRangeBtn" style="display:none;">+ Generate Voucher Range</button>
+      </div>
+      <p style="margin:8px 0 0; font-size:0.9em;" id="rangeSummary">Loading range info…</p>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h2 style="margin-top:0;">1. Select voucher type</h2>
+      <div class="type-pill-row">
+        <button class="type-pill active" data-type="cash">💵 Cash Voucher</button>
+        <button class="type-pill" data-type="creditor">🧾 Creditor Payment</button>
+        <button class="type-pill" data-type="salary">💰 Salary Payment</button>
+      </div>
+
+      <h2>2. Voucher number</h2>
+      <div class="field">
+        <label for="vNo">Voucher No</label>
+        <input class="input" id="vNo" list="blankVoucherList" autocomplete="off" placeholder="e.g. 5001" />
+        <datalist id="blankVoucherList"></datalist>
+        <div class="field-error" id="vNoErr">Voucher number is required.</div>
+      </div>
+      <div id="vNoStatus"></div>
+
+      <h2>3. Voucher details</h2>
+      <div id="entryFormArea"></div>
+
+      <button class="btn btn-primary" id="saveBtn" style="margin-top:10px;">Save voucher</button>
+    </div>
+  </div>
+
+  <!-- ===================== VIEW / SEARCH TAB ===================== -->
+  <div class="tab-panel" id="tabView">
+    <div class="card">
+      <h2 style="margin-top:0;">Search vouchers</h2>
+      <div class="filter-grid">
+        <div class="field">
+          <label for="fDateFrom">Date from</label>
+          <input class="input" id="fDateFrom" type="date" />
+        </div>
+        <div class="field">
+          <label for="fDateTo">Date to</label>
+          <input class="input" id="fDateTo" type="date" />
+        </div>
+        <div class="field">
+          <label for="fNoFrom">Voucher no from</label>
+          <input class="input" id="fNoFrom" type="number" placeholder="5001" />
+        </div>
+        <div class="field">
+          <label for="fNoTo">Voucher no to</label>
+          <input class="input" id="fNoTo" type="number" placeholder="5500" />
+        </div>
+        <div class="field">
+          <label for="fType">Category</label>
+          <select class="input" id="fType">
+            <option value="">All types</option>
+            <option value="cash">Cash Voucher</option>
+            <option value="creditor">Creditor Payment</option>
+            <option value="salary">Salary Payment</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fKeyword">Keyword</label>
+          <input class="input" id="fKeyword" placeholder="Name, description, category…" />
+        </div>
+      </div>
+      <button class="btn btn-primary" id="searchBtn">Search</button>
+      <button class="btn btn-ghost" id="clearFilterBtn">Clear filters</button>
+
+      <div class="export-row">
+        <button class="btn btn-ghost btn-sm" id="exportExcelBtn">⬇ Download Excel</button>
+        <button class="btn btn-ghost btn-sm" id="exportPdfBtn">⬇ Download PDF</button>
+      </div>
+
+      <div id="resultsArea"><div class="skeleton" style="height:18px"></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "payment"; // must match menu.js id
+let myAccess = null;
+let selectedType = "cash";
+let categoriesCache = [];
+let staffCache = [];
+let creditorsCache = [];
+let searchResultsCache = [];
+let selectedStaffMonthInfo = null;
+
+/* ============================ INIT ============================ */
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  const [{ data: cats }, { data: staff }, { data: creds }] = await Promise.all([
+    supabaseClient.from("voucher_categories").select("*, voucher_heads(name)").order("name"),
+    supabaseClient.from("staff").select("staff_id, staff_name, staff_type, is_active").eq("is_active", true).order("staff_name"),
+    supabaseClient.from("creditors").select("*, voucher_categories(name)").order("name")
+  ]);
+  categoriesCache = cats || [];
+  staffCache = staff || [];
+  creditorsCache = creds || [];
+
+  document.getElementById("tabNewBtn").onclick = () => switchTab("new");
+  document.getElementById("tabViewBtn").onclick = () => switchTab("view");
+
+  document.querySelectorAll(".type-pill").forEach(btn => {
+    btn.onclick = () => selectType(btn.dataset.type);
+  });
+
+  if (myAccess.level === "full") {
+    document.getElementById("genRangeBtn").style.display = "inline-flex";
+    document.getElementById("genRangeBtn").onclick = openRangeModal;
+  }
+
+  document.getElementById("vNo").onblur = checkVoucherNo;
+  document.getElementById("saveBtn").onclick = savePayment;
+
+  document.getElementById("searchBtn").onclick = doSearch;
+  document.getElementById("clearFilterBtn").onclick = clearFilters;
+  document.getElementById("exportExcelBtn").onclick = exportExcel;
+  document.getElementById("exportPdfBtn").onclick = exportPdf;
+
+  selectType("cash");
+  await loadRangeSummary();
+  await loadBlankVouchers();
+}
+
+function switchTab(tab) {
+  document.getElementById("tabNewBtn").classList.toggle("active", tab === "new");
+  document.getElementById("tabViewBtn").classList.toggle("active", tab === "view");
+  document.getElementById("tabNew").classList.toggle("active", tab === "new");
+  document.getElementById("tabView").classList.toggle("active", tab === "view");
+  if (tab === "view" && !searchResultsCache.length) doSearch();
+}
+
+/* ==================== VOUCHER RANGE ==================== */
+
+async function loadRangeSummary() {
+  const { data, error } = await supabaseClient
+    .from("voucher_ranges")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(5);
+  const el = document.getElementById("rangeSummary");
+  if (error || !data || !data.length) { el.textContent = "No voucher ranges generated yet."; return; }
+  el.innerHTML = "Recent ranges: " + data.map(r =>
+    `<strong>${escapeHtml(r.prefix || "")}${r.range_start}–${escapeHtml(r.prefix || "")}${r.range_end}</strong>${r.note ? " (" + escapeHtml(r.note) + ")" : ""}`
+  ).join(", ");
+}
+
+async function loadBlankVouchers() {
+  const { data } = await supabaseClient
+    .from("general_vouchers")
+    .select("voucher_no")
+    .eq("status", "blank")
+    .order("voucher_seq", { ascending: true })
+    .limit(500);
+  const list = document.getElementById("blankVoucherList");
+  list.innerHTML = (data || []).map(v => `<option value="${escapeHtml(v.voucher_no)}"></option>`).join("");
+}
+
+function openRangeModal() {
+  openModal({
+    title: "Generate voucher range",
+    subtitle: "Creates one blank row per number in the general voucher register.",
+    bodyHtml: `
+      <div class="field">
+        <label for="rStart">Range start</label>
+        <input class="input" id="rStart" type="number" placeholder="5001" />
+      </div>
+      <div class="field">
+        <label for="rEnd">Range end</label>
+        <input class="input" id="rEnd" type="number" placeholder="5500" />
+      </div>
+      <div class="field">
+        <label for="rPrefix">Prefix (optional)</label>
+        <input class="input" id="rPrefix" placeholder="e.g. CV-" />
+      </div>
+      <div class="field">
+        <label for="rNote">Note (optional)</label>
+        <input class="input" id="rNote" placeholder="e.g. FY 2026-27 block 1" />
+      </div>
+      <div class="field-error" id="rangeErr">Enter a valid range (max 5000 numbers at a time).</div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="genRangeSaveBtn">Generate</button>
+    `,
+    onOpen: () => { document.getElementById("genRangeSaveBtn").onclick = generateRange; }
+  });
+}
+
+async function generateRange() {
+  const start = parseInt(document.getElementById("rStart").value, 10);
+  const end = parseInt(document.getElementById("rEnd").value, 10);
+  const prefix = document.getElementById("rPrefix").value.trim();
+  const note = document.getElementById("rNote").value.trim();
+  const errEl = document.getElementById("rangeErr");
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || (end - start) > 5000) {
+    errEl.classList.add("show"); return;
+  }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("genRangeSaveBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const { data, error } = await supabaseClient.rpc("generate_voucher_range", {
+    p_start: start, p_end: end, p_prefix: prefix || null, p_note: note || null
+  });
+
+  btn.disabled = false; btn.innerHTML = "Generate";
+  if (error) { showToast("Failed to generate range: " + error.message, "error"); return; }
+  await logAudit("voucher_ranges", data.range_id, "insert", null, data);
+  showToast(`Range ${prefix}${start}–${prefix}${end} generated.`, "success");
+  closeModal();
+  await loadRangeSummary();
+  await loadBlankVouchers();
+}
+
+/* ==================== TYPE SELECTOR + ENTRY FORM ==================== */
+
+function selectType(type) {
+  selectedType = type;
+  document.querySelectorAll(".type-pill").forEach(b => b.classList.toggle("active", b.dataset.type === type));
+  renderEntryForm(type);
+  document.getElementById("vNoStatus").innerHTML = "";
+}
+
+function categoryOptionsHtml() {
+  return categoriesCache.map(c => `
+    <option value="${c.category_id}">${escapeHtml(c.voucher_heads ? c.voucher_heads.name : "")} / ${escapeHtml(c.name)}</option>
+  `).join("");
+}
+
+function creditorOptionsHtml() {
+  return creditorsCache.map(c => `<option value="${c.creditor_id}">${escapeHtml(c.name)}</option>`).join("");
+}
+
+function renderEntryForm(type) {
+  const today = new Date().toISOString().slice(0, 10);
+  const area = document.getElementById("entryFormArea");
+
+  if (type === "cash") {
+    area.innerHTML = `
+      <div class="field"><label for="eDate">Date</label><input class="input" id="eDate" type="date" value="${today}" /></div>
+      <div class="field"><label for="eCategory">Category</label><select class="input" id="eCategory">${categoryOptionsHtml()}</select></div>
+      <div class="field"><label for="ePaidTo">Payment to</label><input class="input" id="ePaidTo" /><div class="field-error" id="ePaidToErr">Payee name is required.</div></div>
+      <div class="field"><label for="eAmount">Amount</label><input class="input" id="eAmount" type="number" step="0.01" /><div class="field-error" id="eAmountErr">Enter a valid amount.</div></div>
+      <div class="field"><label for="eMode">Mode</label>
+        <select class="input" id="eMode"><option value="cash">Cash</option><option value="bank">Bank</option><option value="phonepe">PhonePe</option></select>
+      </div>
+      <div class="field"><label for="eDescription">Description</label><input class="input" id="eDescription" /></div>
+      <div class="field"><label for="eRemark">Remark (optional)</label><input class="input" id="eRemark" /></div>
+    `;
+  } else if (type === "creditor") {
+    area.innerHTML = `
+      <div class="field"><label for="eDate">Date</label><input class="input" id="eDate" type="date" value="${today}" /></div>
+      <div class="field"><label for="eCreditor">Creditor</label><select class="input" id="eCreditor">${creditorOptionsHtml()}</select></div>
+      <div class="field"><label for="eAmount">Amount</label><input class="input" id="eAmount" type="number" step="0.01" /><div class="field-error" id="eAmountErr">Enter a valid amount.</div></div>
+      <div class="field"><label for="eMode">Mode</label>
+        <select class="input" id="eMode"><option value="cash">Cash</option><option value="bank">Bank</option><option value="phonepe">PhonePe</option></select>
+      </div>
+      <div class="field"><label for="eRemark">Remark (optional)</label><input class="input" id="eRemark" /></div>
+    `;
+  } else if (type === "salary") {
+    area.innerHTML = `
+      <div class="field"><label for="eDate">Date</label><input class="input" id="eDate" type="date" value="${today}" /></div>
+      <div class="field">
+        <label for="eStaffSearch">Staff</label>
+        <input class="input" id="eStaffSearch" placeholder="Type name to search…" autocomplete="off" />
+        <div id="eStaffResults" style="border:1px solid var(--ink); border-radius:var(--radius-md); max-height:180px; overflow-y:auto; display:none;"></div>
+        <input type="hidden" id="eStaffId" />
+      </div>
+      <div class="field"><label for="eMonth">Month</label><input class="input" id="eMonth" type="month" value="${today.slice(0,7)}" /></div>
+      <div class="due-box" id="dueBox" style="display:none;"></div>
+      <div class="field"><label for="eAmount">Amount</label><input class="input" id="eAmount" type="number" step="0.01" /><div class="field-error" id="eAmountErr">Amount is required.</div></div>
+      <div class="field"><label for="eDiscount">Discount (if any)</label><input class="input" id="eDiscount" type="number" step="0.01" value="0" /></div>
+      <div class="field"><label for="eMode">Mode</label>
+        <select class="input" id="eMode"><option value="cash">Cash</option><option value="bank">Bank</option><option value="phonepe">PhonePe</option></select>
+      </div>
+      <div class="field"><label for="eRemark">Remark (optional)</label><input class="input" id="eRemark" /></div>
+    `;
+    document.getElementById("eStaffSearch").oninput = onStaffSearchInput;
+    document.getElementById("eMonth").onchange = refreshDueBox;
+  }
+}
+
+function onStaffSearchInput() {
+  const q = document.getElementById("eStaffSearch").value.trim().toLowerCase();
+  const resultsEl = document.getElementById("eStaffResults");
+  if (!q) { resultsEl.style.display = "none"; return; }
+  const matches = staffCache.filter(s => s.staff_name.toLowerCase().includes(q)).slice(0, 20);
+  if (!matches.length) { resultsEl.innerHTML = `<div style="padding:8px;">No match.</div>`; resultsEl.style.display = "block"; return; }
+  resultsEl.innerHTML = matches.map(s => `<div class="staff-opt" data-id="${s.staff_id}" data-name="${escapeHtml(s.staff_name)}" style="padding:8px;cursor:pointer;">${escapeHtml(s.staff_name)}</div>`).join("");
+  resultsEl.style.display = "block";
+  resultsEl.querySelectorAll(".staff-opt").forEach(el => {
+    el.onclick = () => {
+      document.getElementById("eStaffId").value = el.dataset.id;
+      document.getElementById("eStaffSearch").value = el.dataset.name;
+      resultsEl.style.display = "none";
+      refreshDueBox();
+    };
+  });
+}
+
+async function refreshDueBox() {
+  const staffId = document.getElementById("eStaffId")?.value;
+  const monthVal = document.getElementById("eMonth")?.value;
+  const dueBox = document.getElementById("dueBox");
+  if (!staffId || !monthVal) { if (dueBox) dueBox.style.display = "none"; selectedStaffMonthInfo = null; return; }
+
+  const salaryMonth = monthVal + "-01";
+  const [{ data: hist }, { data: adj }, { data: payments }] = await Promise.all([
+    supabaseClient.from("staff_salary_history").select("*").eq("staff_id", staffId).lte("effective_month", salaryMonth).order("effective_month", { ascending: false }).limit(1),
+    supabaseClient.from("salary_month_adjustments").select("*").eq("staff_id", staffId).eq("salary_month", salaryMonth).maybeSingle(),
+    supabaseClient.from("salary_payments").select("*").eq("staff_id", staffId).eq("salary_month", salaryMonth)
+  ]);
+
+  const salary = hist && hist.length ? parseFloat(hist[0].salary_amount) : 0;
+  const absentDays = adj ? parseFloat(adj.absent_days) : 0;
+  const bonus = adj ? parseFloat(adj.bonus_amount) : 0;
+  const collected = (payments || []).reduce((sum, p) => sum + parseFloat(p.amount) + parseFloat(p.discount), 0);
+  const deduction = salary / 30 * absentDays;
+  const netPayable = salary - deduction + bonus;
+  const due = netPayable - collected;
+  selectedStaffMonthInfo = { salaryMonth, due };
+
+  dueBox.style.display = "block";
+  dueBox.innerHTML = `
+    Salary: ${salary.toFixed(2)} | Deduction: ${deduction.toFixed(2)} | Bonus: ${bonus.toFixed(2)}<br/>
+    Net payable: ${netPayable.toFixed(2)} | Already collected: ${collected.toFixed(2)}<br/>
+    <strong>Net due: ${due.toFixed(2)}</strong>
+  `;
+}
+
+/* ==================== VOUCHER NO CHECK ==================== */
+
+async function checkVoucherNo() {
+  const no = document.getElementById("vNo").value.trim();
+  const statusEl = document.getElementById("vNoStatus");
+  if (!no) { statusEl.innerHTML = ""; return; }
+
+  const { data, error } = await supabaseClient.from("general_vouchers").select("*").eq("voucher_no", no).maybeSingle();
+  if (error) { statusEl.innerHTML = `<div class="voucher-status-box bad">Could not check voucher no.</div>`; return; }
+
+  if (!data) {
+    statusEl.innerHTML = `<div class="voucher-status-box bad">Voucher ${escapeHtml(no)} has not been generated. Generate a voucher range first.</div>`;
+  } else if (data.status === "used") {
+    statusEl.innerHTML = `
+      <div class="voucher-status-box bad">
+        Voucher ${escapeHtml(no)} is already entered —
+        ${escapeHtml(data.payment_to || "")}, ₹${Number(data.amount || 0).toFixed(2)},
+        ${escapeHtml(data.voucher_date || "")}, ${escapeHtml(data.payment_mode || "")}.
+      </div>`;
+  } else {
+    statusEl.innerHTML = `<div class="voucher-status-box ok">Voucher ${escapeHtml(no)} is available.</div>`;
+  }
+}
+
+/* ==================== SAVE ==================== */
+
+async function savePayment() {
+  const voucherNo = document.getElementById("vNo").value.trim();
+  const noErr = document.getElementById("vNoErr");
+  if (!voucherNo) { noErr.classList.add("show"); return; }
+  noErr.classList.remove("show");
+
+  // re-check right before saving to avoid race conditions
+  const { data: gv } = await supabaseClient.from("general_vouchers").select("status").eq("voucher_no", voucherNo).maybeSingle();
+  if (!gv) { showToast("Voucher number has not been generated.", "error"); return; }
+  if (gv.status === "used") { showToast("Voucher is already entered.", "error"); return; }
+
+  const btn = document.getElementById("saveBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  try {
+    if (selectedType === "cash") {
+      const paid_to = document.getElementById("ePaidTo").value.trim();
+      const amount = parseFloat(document.getElementById("eAmount").value);
+      let ok = true;
+      document.getElementById("ePaidToErr").classList.toggle("show", !paid_to); if (!paid_to) ok = false;
+      document.getElementById("eAmountErr").classList.toggle("show", !amount || amount <= 0); if (!amount || amount <= 0) ok = false;
+      if (!ok) { btn.disabled = false; btn.innerHTML = "Save voucher"; return; }
+
+      const params = {
+        p_voucher_no: voucherNo,
+        p_voucher_date: document.getElementById("eDate").value,
+        p_category_id: document.getElementById("eCategory").value,
+        p_paid_to: paid_to,
+        p_amount: amount,
+        p_payment_mode: document.getElementById("eMode").value,
+        p_description: document.getElementById("eDescription").value.trim(),
+        p_remark: document.getElementById("eRemark").value.trim() || null
+      };
+      const { data, error } = await supabaseClient.rpc("submit_cash_voucher", params);
+      if (error) throw error;
+      await logAudit("cash_vouchers", data.voucher_id, "insert", null, data);
+      await logAudit("general_vouchers", voucherNo, "insert", null, data);
+
+    } else if (selectedType === "creditor") {
+      const amount = parseFloat(document.getElementById("eAmount").value);
+      document.getElementById("eAmountErr").classList.toggle("show", !amount || amount <= 0);
+      if (!amount || amount <= 0) { btn.disabled = false; btn.innerHTML = "Save voucher"; return; }
+
+      const params = {
+        p_voucher_no: voucherNo,
+        p_payment_date: document.getElementById("eDate").value,
+        p_creditor_id: document.getElementById("eCreditor").value,
+        p_amount: amount,
+        p_payment_mode: document.getElementById("eMode").value,
+        p_remark: document.getElementById("eRemark").value.trim() || null
+      };
+      const { data, error } = await supabaseClient.rpc("submit_creditor_payment", params);
+      if (error) throw error;
+      await logAudit("creditor_payments", data.payment_id, "insert", null, data);
+      await logAudit("general_vouchers", voucherNo, "insert", null, data);
+
+    } else if (selectedType === "salary") {
+      const staffId = document.getElementById("eStaffId").value;
+      const monthVal = document.getElementById("eMonth").value;
+      const amount = parseFloat(document.getElementById("eAmount").value);
+      let ok = true;
+      document.getElementById("eAmountErr").classList.toggle("show", isNaN(amount)); if (isNaN(amount)) ok = false;
+      if (!staffId) { showToast("Please select a staff member.", "error"); ok = false; }
+      if (!monthVal) { showToast("Please select a month.", "error"); ok = false; }
+      if (!ok) { btn.disabled = false; btn.innerHTML = "Save voucher"; return; }
+
+      const params = {
+        p_voucher_no: voucherNo,
+        p_payment_date: document.getElementById("eDate").value,
+        p_staff_id: staffId,
+        p_salary_month: monthVal + "-01",
+        p_amount: amount,
+        p_discount: parseFloat(document.getElementById("eDiscount").value) || 0,
+        p_mode: document.getElementById("eMode").value,
+        p_remark: document.getElementById("eRemark").value.trim() || null
+      };
+      const { data, error } = await supabaseClient.rpc("submit_salary_payment", params);
+      if (error) throw error;
+      await logAudit("salary_payments", data.payment_id, "insert", null, data);
+      await logAudit("general_vouchers", voucherNo, "insert", null, data);
+    }
+
+    showToast("Voucher saved.", "success");
+    document.getElementById("vNo").value = "";
+    document.getElementById("vNoStatus").innerHTML = "";
+    selectType(selectedType);
+    await loadBlankVouchers();
+
+  } catch (err) {
+    const msg = (err.message || "").includes("VOUCHER_ALREADY_USED") ? "Voucher is already entered."
+      : (err.message || "").includes("VOUCHER_NOT_GENERATED") ? "Voucher number has not been generated."
+      : "Save failed: " + err.message;
+    showToast(msg, "error");
+  } finally {
+    btn.disabled = false; btn.innerHTML = "Save voucher";
+  }
+}
+
+/* ==================== VIEW / SEARCH ==================== */
+
+function clearFilters() {
+  ["fDateFrom","fDateTo","fNoFrom","fNoTo","fKeyword"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("fType").value = "";
+  doSearch();
+}
+
+async function doSearch() {
+  const area = document.getElementById("resultsArea");
+  area.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
+
+  let q = supabaseClient.from("general_vouchers").select("*").eq("status", "used");
+
+  const dateFrom = document.getElementById("fDateFrom").value;
+  const dateTo = document.getElementById("fDateTo").value;
+  const noFrom = document.getElementById("fNoFrom").value;
+  const noTo = document.getElementById("fNoTo").value;
+  const type = document.getElementById("fType").value;
+  const keyword = document.getElementById("fKeyword").value.trim();
+
+  if (dateFrom) q = q.gte("voucher_date", dateFrom);
+  if (dateTo) q = q.lte("voucher_date", dateTo);
+  if (noFrom) q = q.gte("voucher_seq", parseInt(noFrom, 10));
+  if (noTo) q = q.lte("voucher_seq", parseInt(noTo, 10));
+  if (type) q = q.eq("voucher_type", type);
+  if (keyword) q = q.or(`payment_to.ilike.%${keyword}%,description.ilike.%${keyword}%,category.ilike.%${keyword}%,voucher_no.ilike.%${keyword}%`);
+
+  q = q.order("voucher_seq", { ascending: false }).limit(1000);
+
+  const { data, error } = await q;
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Search failed: ${escapeHtml(error.message)}</p></div>`; return; }
+  searchResultsCache = data || [];
+  renderResults();
+}
+
+function typeBadge(type) {
+  const label = type === "cash" ? "Cash" : type === "creditor" ? "Creditor" : type === "salary" ? "Salary" : "-";
+  return `<span class="badge badge-neutral">${label}</span>`;
+}
+
+function renderResults() {
+  const area = document.getElementById("resultsArea");
+  if (!searchResultsCache.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">🧾</div><p>No vouchers found.</p></div>`;
+    return;
+  }
+  const canEdit = myAccess.level === "full";
+  area.innerHTML = `
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Voucher No</th><th>Date</th><th>Type</th><th>Category</th><th>Payment To</th>
+            <th>Amount</th><th>Mode</th><th>Description</th><th>Entered By</th><th>Entry Time</th>
+            ${canEdit ? "<th></th>" : ""}
+          </tr>
+        </thead>
+        <tbody>
+          ${searchResultsCache.map(v => `
+            <tr>
+              <td>${escapeHtml(v.voucher_no)}</td>
+              <td>${escapeHtml(v.voucher_date || "")}</td>
+              <td>${typeBadge(v.voucher_type)}</td>
+              <td>${escapeHtml(v.category || "")}</td>
+              <td>${escapeHtml(v.payment_to || "")}</td>
+              <td>₹${Number(v.amount || 0).toFixed(2)}</td>
+              <td>${escapeHtml(v.payment_mode || "")}</td>
+              <td>${escapeHtml(v.description || "")}</td>
+              <td>${escapeHtml(v.entered_by || "")}</td>
+              <td>${formatDateTime(v.entry_time)}</td>
+              ${canEdit ? `<td>
+                <button class="btn btn-ghost btn-sm edit-v-btn" data-no="${escapeHtml(v.voucher_no)}">Edit</button>
+                <button class="btn btn-danger btn-sm del-v-btn" data-no="${escapeHtml(v.voucher_no)}">Delete</button>
+              </td>` : ""}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+  if (canEdit) {
+    area.querySelectorAll(".edit-v-btn").forEach(b => b.onclick = () => openEditModal(b.dataset.no));
+    area.querySelectorAll(".del-v-btn").forEach(b => b.onclick = () => confirmDeleteVoucher(b.dataset.no));
+  }
+}
+
+/* ==================== EDIT / DELETE ==================== */
+
+async function openEditModal(voucherNo) {
+  const { data: gv, error } = await supabaseClient.from("general_vouchers").select("*").eq("voucher_no", voucherNo).single();
+  if (error || !gv) { showToast("Could not load voucher.", "error"); return; }
+
+  if (gv.voucher_type === "cash") {
+    const { data: row } = await supabaseClient.from("cash_vouchers").select("*").eq("voucher_id", gv.source_id).single();
+    openModal({
+      title: "Edit cash voucher " + voucherNo,
+      wide: true,
+      bodyHtml: `
+        <div class="field"><label for="mDate">Date</label><input class="input" id="mDate" type="date" value="${row.voucher_date}" /></div>
+        <div class="field"><label for="mCategory">Category</label><select class="input" id="mCategory">${categoriesCache.map(c => `<option value="${c.category_id}" ${c.category_id===row.category_id?"selected":""}>${escapeHtml(c.voucher_heads?c.voucher_heads.name:"")} / ${escapeHtml(c.name)}</option>`).join("")}</select></div>
+        <div class="field"><label for="mPaidTo">Payment to</label><input class="input" id="mPaidTo" value="${escapeHtml(row.paid_to)}" /></div>
+        <div class="field"><label for="mAmount">Amount</label><input class="input" id="mAmount" type="number" step="0.01" value="${row.amount}" /></div>
+        <div class="field"><label for="mMode">Mode</label><select class="input" id="mMode">
+          <option value="cash" ${row.payment_mode==="cash"?"selected":""}>Cash</option>
+          <option value="bank" ${row.payment_mode==="bank"?"selected":""}>Bank</option>
+          <option value="phonepe" ${row.payment_mode==="phonepe"?"selected":""}>PhonePe</option></select></div>
+        <div class="field"><label for="mDescription">Description</label><input class="input" id="mDescription" value="${escapeHtml(row.description||"")}" /></div>
+        <div class="field"><label for="mRemark">Remark</label><input class="input" id="mRemark" value="${escapeHtml(row.remark||"")}" /></div>
+      `,
+      footHtml: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="mSaveBtn">Save changes</button>`,
+      onOpen: () => { document.getElementById("mSaveBtn").onclick = async () => {
+        const btn = document.getElementById("mSaveBtn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const { data, error } = await supabaseClient.rpc("update_cash_voucher", {
+          p_voucher_id: row.voucher_id, p_voucher_date: document.getElementById("mDate").value,
+          p_category_id: document.getElementById("mCategory").value, p_paid_to: document.getElementById("mPaidTo").value.trim(),
+          p_amount: parseFloat(document.getElementById("mAmount").value), p_payment_mode: document.getElementById("mMode").value,
+          p_description: document.getElementById("mDescription").value.trim(), p_remark: document.getElementById("mRemark").value.trim() || null
+        });
+        if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled=false; btn.innerHTML="Save changes"; return; }
+        await logAudit("cash_vouchers", row.voucher_id, "update", row, data);
+        await logAudit("general_vouchers", voucherNo, "update", gv, data);
+        showToast("Voucher updated.", "success"); closeModal(); await doSearch();
+      };}
+    });
+
+  } else if (gv.voucher_type === "creditor") {
+    const { data: row } = await supabaseClient.from("creditor_payments").select("*").eq("payment_id", gv.source_id).single();
+    openModal({
+      title: "Edit creditor payment " + voucherNo,
+      bodyHtml: `
+        <div class="field"><label for="mDate">Date</label><input class="input" id="mDate" type="date" value="${row.payment_date}" /></div>
+        <div class="field"><label for="mCreditor">Creditor</label><select class="input" id="mCreditor">${creditorsCache.map(c => `<option value="${c.creditor_id}" ${c.creditor_id===row.creditor_id?"selected":""}>${escapeHtml(c.name)}</option>`).join("")}</select></div>
+        <div class="field"><label for="mAmount">Amount</label><input class="input" id="mAmount" type="number" step="0.01" value="${row.amount}" /></div>
+        <div class="field"><label for="mMode">Mode</label><select class="input" id="mMode">
+          <option value="cash" ${row.payment_mode==="cash"?"selected":""}>Cash</option>
+          <option value="bank" ${row.payment_mode==="bank"?"selected":""}>Bank</option>
+          <option value="phonepe" ${row.payment_mode==="phonepe"?"selected":""}>PhonePe</option></select></div>
+        <div class="field"><label for="mRemark">Remark</label><input class="input" id="mRemark" value="${escapeHtml(row.remark||"")}" /></div>
+      `,
+      footHtml: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="mSaveBtn">Save changes</button>`,
+      onOpen: () => { document.getElementById("mSaveBtn").onclick = async () => {
+        const btn = document.getElementById("mSaveBtn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const { data, error } = await supabaseClient.rpc("update_creditor_payment", {
+          p_payment_id: row.payment_id, p_payment_date: document.getElementById("mDate").value,
+          p_creditor_id: document.getElementById("mCreditor").value, p_amount: parseFloat(document.getElementById("mAmount").value),
+          p_payment_mode: document.getElementById("mMode").value, p_remark: document.getElementById("mRemark").value.trim() || null
+        });
+        if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled=false; btn.innerHTML="Save changes"; return; }
+        await logAudit("creditor_payments", row.payment_id, "update", row, data);
+        await logAudit("general_vouchers", voucherNo, "update", gv, data);
+        showToast("Payment updated.", "success"); closeModal(); await doSearch();
+      };}
+    });
+
+  } else if (gv.voucher_type === "salary") {
+    const { data: row } = await supabaseClient.from("salary_payments").select("*, staff(staff_name)").eq("payment_id", gv.source_id).single();
+    openModal({
+      title: "Edit salary payment " + voucherNo,
+      bodyHtml: `
+        <div class="field"><label for="mDate">Date</label><input class="input" id="mDate" type="date" value="${row.payment_date}" /></div>
+        <p>Staff: <strong>${escapeHtml(row.staff?.staff_name || "")}</strong> (unchanged — delete and re-enter to change staff)</p>
+        <div class="field"><label for="mMonth">Month</label><input class="input" id="mMonth" type="month" value="${row.salary_month.slice(0,7)}" /></div>
+        <div class="field"><label for="mAmount">Amount</label><input class="input" id="mAmount" type="number" step="0.01" value="${row.amount}" /></div>
+        <div class="field"><label for="mDiscount">Discount</label><input class="input" id="mDiscount" type="number" step="0.01" value="${row.discount}" /></div>
+        <div class="field"><label for="mMode">Mode</label><select class="input" id="mMode">
+          <option value="cash" ${row.mode==="cash"?"selected":""}>Cash</option>
+          <option value="bank" ${row.mode==="bank"?"selected":""}>Bank</option>
+          <option value="phonepe" ${row.mode==="phonepe"?"selected":""}>PhonePe</option></select></div>
+        <div class="field"><label for="mRemark">Remark</label><input class="input" id="mRemark" value="${escapeHtml(row.remark||"")}" /></div>
+      `,
+      footHtml: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="mSaveBtn">Save changes</button>`,
+      onOpen: () => { document.getElementById("mSaveBtn").onclick = async () => {
+        const btn = document.getElementById("mSaveBtn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const { data, error } = await supabaseClient.rpc("update_salary_payment", {
+          p_payment_id: row.payment_id, p_payment_date: document.getElementById("mDate").value,
+          p_staff_id: row.staff_id, p_salary_month: document.getElementById("mMonth").value + "-01",
+          p_amount: parseFloat(document.getElementById("mAmount").value), p_discount: parseFloat(document.getElementById("mDiscount").value) || 0,
+          p_mode: document.getElementById("mMode").value, p_remark: document.getElementById("mRemark").value.trim() || null
+        });
+        if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled=false; btn.innerHTML="Save changes"; return; }
+        await logAudit("salary_payments", row.payment_id, "update", row, data);
+        await logAudit("general_vouchers", voucherNo, "update", gv, data);
+        showToast("Payment updated.", "success"); closeModal(); await doSearch();
+      };}
+    });
+  }
+}
+
+function confirmDeleteVoucher(voucherNo) {
+  openModal({
+    title: "Delete voucher?",
+    subtitle: "This removes the entry from both the register and its source table. The voucher number becomes blank and reusable.",
+    bodyHtml: `<p>Delete voucher "<strong>${escapeHtml(voucherNo)}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelBtn").onclick = async () => {
+        const { error } = await supabaseClient.rpc("delete_voucher_by_no", { p_voucher_no: voucherNo });
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("general_vouchers", voucherNo, "delete", { voucher_no: voucherNo }, null);
+        closeModal();
+        showToast("Voucher deleted.", "success");
+        await doSearch();
+        await loadBlankVouchers();
+      };
+    }
+  });
+}
+
+/* ==================== EXPORT ==================== */
+
+function exportRows() {
+  return searchResultsCache.map(v => ({
+    "Voucher No": v.voucher_no,
+    "Date": v.voucher_date || "",
+    "Type": v.voucher_type || "",
+    "Category": v.category || "",
+    "Payment To": v.payment_to || "",
+    "Amount": Number(v.amount || 0),
+    "Mode": v.payment_mode || "",
+    "Description": v.description || "",
+    "Entry Time": v.entry_time ? formatDateTime(v.entry_time) : ""
+  }));
+}
+
+function exportExcel() {
+  if (!searchResultsCache.length) { showToast("No results to export.", "error"); return; }
+  const ws = XLSX.utils.json_to_sheet(exportRows());
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Vouchers");
+  XLSX.writeFile(wb, `vouchers_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function exportPdf() {
+  if (!searchResultsCache.length) { showToast("No results to export.", "error"); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "landscape" });
+  doc.text("Voucher Register", 14, 12);
+  doc.autoTable({
+    startY: 18,
+    head: [["Voucher No","Date","Type","Category","Payment To","Amount","Mode","Description"]],
+    body: searchResultsCache.map(v => [
+      v.voucher_no, v.voucher_date || "", v.voucher_type || "", v.category || "",
+      v.payment_to || "", Number(v.amount || 0).toFixed(2), v.payment_mode || "", v.description || ""
+    ]),
+    styles: { fontSize: 8 }
+  });
+  doc.save(`vouchers_${new Date().toISOString().slice(0,10)}.pdf`);
+}
+
+init();
+</script>
+</body>
+</html>
