@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Old Dues — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  .tab-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .tab-bar button.active { font-weight:600; text-decoration:underline; }
+  .sub-tab-bar { display:flex; gap:8px; margin-bottom:16px; }
+  .sub-tab-bar button.active { font-weight:600; text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Fees</span>
+      <h1>Old Dues</h1>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button class="btn btn-ghost active" id="navUploadBtn" onclick="showSection('upload')">Upload</button>
+    <button class="btn btn-ghost" id="navReceiveBtn" onclick="showSection('receive')">Receive Payment</button>
+    <button class="btn btn-ghost" id="navReportBtn" onclick="showSection('report')">Report</button>
+  </div>
+
+  <!-- ===================== SECTION 1: UPLOAD ===================== -->
+  <div id="uploadSection">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span class="eyebrow">Add due records</span>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost" id="bulkBtn" style="display:none;">Bulk Upload (Excel)</button>
+          <button class="btn btn-primary" id="addBtn" style="display:none;">Add Due</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data" id="dueTable">
+          <thead>
+            <tr>
+              <th>Student Name</th><th>Reg. No.</th><th>Class</th><th>Year</th>
+              <th>Amount Due</th><th>Added By</th><th>Added On</th>
+            </tr>
+          </thead>
+          <tbody id="listArea">
+            <tr><td colspan="7"><div class="skeleton" style="height:18px"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="emptyState" style="display:none;">
+        <div class="empty-state"><div class="icon">📄</div><p>No due records yet.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SECTION 2: RECEIVE PAYMENT ===================== -->
+  <div id="receiveSection" style="display:none;">
+    <div class="card">
+      <div class="field">
+        <label for="searchInput">Search by student name or registration number</label>
+        <input class="input" id="searchInput" placeholder="Type a name or reg. no. and press Enter" />
+      </div>
+      <div id="resultsArea"></div>
+    </div>
+  </div>
+
+  <!-- ===================== SECTION 3: REPORT ===================== -->
+  <div id="reportSection" style="display:none;">
+    <div class="sub-tab-bar">
+      <button class="btn btn-ghost active" id="tabYearBtn" onclick="switchReportTab('year')">By Year</button>
+      <button class="btn btn-ghost" id="tabStudentBtn" onclick="switchReportTab('student')">Student Search</button>
+    </div>
+
+    <div class="card" id="yearPanel">
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Year</th><th>Total Due</th><th>Total Received</th><th>Total Discount</th><th>Balance Outstanding</th></tr></thead>
+          <tbody id="yearListArea"><tr><td colspan="5"><div class="skeleton" style="height:18px"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="studentPanel" style="display:none;">
+      <div class="field">
+        <label for="studentSearchInput">Search by student name or registration number</label>
+        <input class="input" id="studentSearchInput" placeholder="Type and press Enter" />
+      </div>
+      <div id="studentResultsArea"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "old-dues";
+let myAccess = null;
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile || myAccess.level === "none") return;
+
+  // Upload section
+  document.getElementById("addBtn").style.display = "inline-flex";
+  document.getElementById("addBtn").onclick = () => openAddModal();
+  document.getElementById("bulkBtn").style.display = "inline-flex";
+  document.getElementById("bulkBtn").onclick = () => openBulkModal();
+  await loadList();
+
+  // Receive section
+  document.getElementById("searchInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runReceiveSearch(e.target.value.trim());
+  });
+
+  // Report section
+  document.getElementById("studentSearchInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runStudentSearch(e.target.value.trim());
+  });
+}
+
+// ================================================================
+// Top-level nav between Upload / Receive / Report
+// ================================================================
+function showSection(section) {
+  document.getElementById("uploadSection").style.display = section === "upload" ? "block" : "none";
+  document.getElementById("receiveSection").style.display = section === "receive" ? "block" : "none";
+  document.getElementById("reportSection").style.display = section === "report" ? "block" : "none";
+
+  document.getElementById("navUploadBtn").classList.toggle("active", section === "upload");
+  document.getElementById("navReceiveBtn").classList.toggle("active", section === "receive");
+  document.getElementById("navReportBtn").classList.toggle("active", section === "report");
+
+  if (section === "report") loadYearSummary();
+}
+
+// ================================================================
+// SECTION 1: Upload — manual add + bulk Excel
+// ================================================================
+async function loadList() {
+  const { data, error } = await supabaseClient
+    .from("student_old_dues")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  const tbody = document.getElementById("listArea");
+  const empty = document.getElementById("emptyState");
+
+  if (error) { showToast("Failed to load dues: " + error.message, "error"); return; }
+  if (!data || data.length === 0) {
+    tbody.innerHTML = "";
+    document.getElementById("dueTable").style.display = "none";
+    empty.style.display = "block";
+    return;
+  }
+  document.getElementById("dueTable").style.display = "table";
+  empty.style.display = "none";
+
+  tbody.innerHTML = data.map(row => `
+    <tr>
+      <td>${escapeHtml(row.student_name)}</td>
+      <td>${escapeHtml(row.registration_number)}</td>
+      <td>${escapeHtml(row.class)}</td>
+      <td>${escapeHtml(row.due_year)}</td>
+      <td>₹${Number(row.due_amount).toFixed(2)}</td>
+      <td>${row.created_by ? escapeHtml(String(row.created_by).slice(0,8)) : "-"}</td>
+      <td>${formatDateTime(row.created_at)}</td>
+    </tr>
+  `).join("");
+}
+
+function openAddModal() {
+  openModal({
+    title: "Add old due",
+    subtitle: "Enter one student's due record",
+    bodyHtml: `
+      <div class="field">
+        <label for="dName">Student Name</label>
+        <input class="input" id="dName" />
+        <div class="field-error" id="dNameErr">Student name is required.</div>
+      </div>
+      <div class="field">
+        <label for="dReg">Registration Number</label>
+        <input class="input" id="dReg" />
+        <div class="field-error" id="dRegErr">Registration number is required.</div>
+      </div>
+      <div class="field">
+        <label for="dClass">Class</label>
+        <input class="input" id="dClass" />
+        <div class="field-error" id="dClassErr">Class is required.</div>
+      </div>
+      <div class="field">
+        <label for="dYear">Year</label>
+        <input class="input" id="dYear" placeholder="e.g. 2023-24" />
+        <div class="field-error" id="dYearErr">Year is required.</div>
+      </div>
+      <div class="field">
+        <label for="dAmount">Amount Due</label>
+        <input class="input" id="dAmount" type="number" min="0" step="0.01" />
+        <div class="field-error" id="dAmountErr">Enter a valid amount.</div>
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveDueBtn">Add Due</button>
+    `,
+    onOpen: () => { document.getElementById("saveDueBtn").onclick = saveDue; }
+  });
+}
+
+async function saveDue() {
+  const name = document.getElementById("dName").value.trim();
+  const reg = document.getElementById("dReg").value.trim();
+  const cls = document.getElementById("dClass").value.trim();
+  const year = document.getElementById("dYear").value.trim();
+  const amount = parseFloat(document.getElementById("dAmount").value);
+
+  let valid = true;
+  const setErr = (id, show) => document.getElementById(id).classList.toggle("show", show);
+  setErr("dNameErr", !name); if (!name) valid = false;
+  setErr("dRegErr", !reg); if (!reg) valid = false;
+  setErr("dClassErr", !cls); if (!cls) valid = false;
+  setErr("dYearErr", !year); if (!year) valid = false;
+  setErr("dAmountErr", !(amount >= 0)); if (!(amount >= 0)) valid = false;
+  if (!valid) return;
+
+  const btn = document.getElementById("saveDueBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const record = await withAuditStamp({
+    student_name: name,
+    registration_number: reg,
+    class: cls,
+    due_year: year,
+    due_amount: amount
+  }, { isNew: true });
+
+  const { data, error } = await supabaseClient
+    .from("student_old_dues").insert(record).select().single();
+
+  if (error) {
+    showToast("Add failed: " + error.message, "error");
+    btn.disabled = false; btn.innerHTML = "Add Due";
+    return;
+  }
+  await logAudit("student_old_dues", data.due_id, "insert", null, record);
+  showToast("Due added.", "success");
+  closeModal();
+  await loadList();
+}
+
+let parsedRows = [];
+
+function openBulkModal() {
+  parsedRows = [];
+  openModal({
+    title: "Bulk upload old dues",
+    subtitle: "Excel columns: Student Name, Registration Number, Class, Amount Due, Year",
+    wide: true,
+    bodyHtml: `
+      <div class="field">
+        <label for="bulkFile">Choose Excel file (.xlsx / .xls)</label>
+        <input class="input" id="bulkFile" type="file" accept=".xlsx,.xls" />
+      </div>
+      <div id="previewArea" style="margin-top:12px;"></div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="confirmBulkBtn" disabled>Import 0 rows</button>
+    `,
+    onOpen: () => {
+      document.getElementById("bulkFile").onchange = handleBulkFile;
+      document.getElementById("confirmBulkBtn").onclick = confirmBulkImport;
+    }
+  });
+}
+
+function handleBulkFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const wb = XLSX.read(evt.target.result, { type: "binary" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+    parsedRows = rows.map(r => ({
+      student_name: String(r["Student Name"] || "").trim(),
+      registration_number: String(r["Registration Number"] || "").trim(),
+      class: String(r["Class"] || "").trim(),
+      due_year: String(r["Year"] || "").trim(),
+      due_amount: parseFloat(r["Amount Due"])
+    })).filter(r => r.student_name && r.registration_number && !isNaN(r.due_amount));
+
+    const previewArea = document.getElementById("previewArea");
+    if (parsedRows.length === 0) {
+      previewArea.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>No valid rows found. Check column headers.</p></div>`;
+    } else {
+      previewArea.innerHTML = `
+        <div class="table-wrap" style="max-height:260px; overflow:auto;">
+          <table class="data">
+            <thead><tr><th>Name</th><th>Reg No.</th><th>Class</th><th>Year</th><th>Amount</th></tr></thead>
+            <tbody>
+              ${parsedRows.slice(0, 50).map(r => `
+                <tr>
+                  <td>${escapeHtml(r.student_name)}</td>
+                  <td>${escapeHtml(r.registration_number)}</td>
+                  <td>${escapeHtml(r.class)}</td>
+                  <td>${escapeHtml(r.due_year)}</td>
+                  <td>₹${r.due_amount.toFixed(2)}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+        ${parsedRows.length > 50 ? `<p>...and ${parsedRows.length - 50} more rows.</p>` : ""}
+      `;
+    }
+    const btn = document.getElementById("confirmBulkBtn");
+    btn.disabled = parsedRows.length === 0;
+    btn.textContent = `Import ${parsedRows.length} rows`;
+  };
+  reader.readAsBinaryString(file);
+}
+
+async function confirmBulkImport() {
+  if (parsedRows.length === 0) return;
+  const btn = document.getElementById("confirmBulkBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const stamped = [];
+  for (const row of parsedRows) {
+    stamped.push(await withAuditStamp({ ...row }, { isNew: true }));
+  }
+
+  const batchSize = 500;
+  let inserted = 0;
+  for (let i = 0; i < stamped.length; i += batchSize) {
+    const batch = stamped.slice(i, i + batchSize);
+    const { data, error } = await supabaseClient
+      .from("student_old_dues").insert(batch).select();
+    if (error) {
+      showToast(`Import stopped after ${inserted} rows: ${error.message}`, "error");
+      break;
+    }
+    inserted += data.length;
+    for (const d of data) {
+      await logAudit("student_old_dues", d.due_id, "insert", null, d);
+    }
+  }
+
+  showToast(`${inserted} due record(s) imported.`, "success");
+  closeModal();
+  await loadList();
+}
+
+// ================================================================
+// SECTION 2: Receive Payment
+// ================================================================
+async function runReceiveSearch(term) {
+  const resultsArea = document.getElementById("resultsArea");
+  if (!term) { resultsArea.innerHTML = ""; return; }
+  resultsArea.innerHTML = `<div class="skeleton" style="height:18px; margin-top:12px;"></div>`;
+
+  const { data, error } = await supabaseClient
+    .from("student_due_balances")
+    .select("*")
+    .or(`student_name.ilike.%${term}%,registration_number.ilike.%${term}%`)
+    .order("due_year", { ascending: false });
+
+  if (error) { showToast("Search failed: " + error.message, "error"); resultsArea.innerHTML = ""; return; }
+  if (!data || data.length === 0) {
+    resultsArea.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching students found.</p></div>`;
+    return;
+  }
+
+  resultsArea.innerHTML = `
+    <div class="table-wrap" style="margin-top:12px;">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Student</th><th>Reg. No.</th><th>Class</th><th>Year</th>
+            <th>Due</th><th>Received</th><th>Discount</th><th>Balance</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(row => `
+            <tr>
+              <td>${escapeHtml(row.student_name)}</td>
+              <td>${escapeHtml(row.registration_number)}</td>
+              <td>${escapeHtml(row.class)}</td>
+              <td>${escapeHtml(row.due_year)}</td>
+              <td>₹${Number(row.due_amount).toFixed(2)}</td>
+              <td>₹${Number(row.total_received).toFixed(2)}</td>
+              <td>₹${Number(row.total_discount).toFixed(2)}</td>
+              <td><strong>₹${Number(row.balance_due).toFixed(2)}</strong></td>
+              <td>
+                ${Number(row.balance_due) > 0
+                  ? `<button class="btn btn-primary btn-sm" onclick='openReceiveModal(${JSON.stringify(row)})'>Receive</button>`
+                  : `<span class="badge badge-success">Cleared</span>`}
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openReceiveModal(row) {
+  const today = new Date().toISOString().slice(0, 10);
+  openModal({
+    title: `Receive payment — ${row.student_name}`,
+    subtitle: `Reg. No. ${row.registration_number} · Year ${row.due_year} · Balance ₹${Number(row.balance_due).toFixed(2)}`,
+    bodyHtml: `
+      <div class="field">
+        <label for="pDate">Date</label>
+        <input class="input" id="pDate" type="date" value="${today}" />
+      </div>
+      <div class="field">
+        <label for="pAmount">Amount Received</label>
+        <input class="input" id="pAmount" type="number" min="0" step="0.01" />
+        <div class="field-error" id="pAmountErr">Enter a valid amount.</div>
+      </div>
+      <div class="field">
+        <label for="pDiscount">Discount</label>
+        <input class="input" id="pDiscount" type="number" min="0" step="0.01" value="0" />
+      </div>
+      <div class="field">
+        <label for="pMode">Mode</label>
+        <select class="input" id="pMode">
+          <option value="cash">Cash</option>
+          <option value="bank">Bank</option>
+          <option value="phonepe">PhonePe</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="pDesc">Description (optional)</label>
+        <input class="input" id="pDesc" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="savePaymentBtn">Submit</button>
+    `,
+    onOpen: () => { document.getElementById("savePaymentBtn").onclick = () => savePayment(row); }
+  });
+}
+
+async function savePayment(row) {
+  const date = document.getElementById("pDate").value;
+  const amount = parseFloat(document.getElementById("pAmount").value);
+  const discount = parseFloat(document.getElementById("pDiscount").value) || 0;
+  const mode = document.getElementById("pMode").value;
+  const description = document.getElementById("pDesc").value.trim() || null;
+
+  const errEl = document.getElementById("pAmountErr");
+  if (!(amount >= 0) || !date) { errEl.classList.add("show"); return; }
+  errEl.classList.remove("show");
+
+  if (amount + discount > Number(row.balance_due) + 0.01) {
+    showToast("Amount + discount exceeds the remaining balance.", "error");
+    return;
+  }
+
+  const btn = document.getElementById("savePaymentBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const record = await withAuditStamp({
+    due_id: row.due_id,
+    payment_date: date,
+    amount, discount, mode, description
+  }, { isNew: true });
+
+  const { data, error } = await supabaseClient
+    .from("due_payments").insert(record).select().single();
+
+  if (error) {
+    showToast("Payment failed: " + error.message, "error");
+    btn.disabled = false; btn.innerHTML = "Submit";
+    return;
+  }
+  await logAudit("due_payments", data.payment_id, "insert", null, record);
+  showToast("Payment recorded.", "success");
+  closeModal();
+  await runReceiveSearch(document.getElementById("searchInput").value.trim());
+}
+
+// ================================================================
+// SECTION 3: Report — by year / student search + history / edit / delete
+// ================================================================
+function switchReportTab(tab) {
+  document.getElementById("yearPanel").style.display = tab === "year" ? "block" : "none";
+  document.getElementById("studentPanel").style.display = tab === "student" ? "block" : "none";
+  document.getElementById("tabYearBtn").classList.toggle("active", tab === "year");
+  document.getElementById("tabStudentBtn").classList.toggle("active", tab === "student");
+}
+
+async function loadYearSummary() {
+  const { data, error } = await supabaseClient
+    .from("student_due_balances")
+    .select("due_year, due_amount, total_received, total_discount, balance_due");
+
+  const tbody = document.getElementById("yearListArea");
+  if (error) { showToast("Failed to load summary: " + error.message, "error"); return; }
+  if (!data || data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="icon">📄</div><p>No due records yet.</p></div></td></tr>`;
+    return;
+  }
+
+  const byYear = {};
+  for (const row of data) {
+    const y = row.due_year;
+    if (!byYear[y]) byYear[y] = { due: 0, received: 0, discount: 0, balance: 0 };
+    byYear[y].due += Number(row.due_amount);
+    byYear[y].received += Number(row.total_received);
+    byYear[y].discount += Number(row.total_discount);
+    byYear[y].balance += Number(row.balance_due);
+  }
+
+  const years = Object.keys(byYear).sort().reverse();
+  tbody.innerHTML = years.map(y => `
+    <tr>
+      <td>${escapeHtml(y)}</td>
+      <td>₹${byYear[y].due.toFixed(2)}</td>
+      <td>₹${byYear[y].received.toFixed(2)}</td>
+      <td>₹${byYear[y].discount.toFixed(2)}</td>
+      <td><strong>₹${byYear[y].balance.toFixed(2)}</strong></td>
+    </tr>
+  `).join("");
+}
+
+async function runStudentSearch(term) {
+  const area = document.getElementById("studentResultsArea");
+  if (!term) { area.innerHTML = ""; return; }
+  area.innerHTML = `<div class="skeleton" style="height:18px; margin-top:12px;"></div>`;
+
+  const { data, error } = await supabaseClient
+    .from("student_due_balances")
+    .select("*")
+    .or(`student_name.ilike.%${term}%,registration_number.ilike.%${term}%`)
+    .order("due_year", { ascending: false });
+
+  if (error) { showToast("Search failed: " + error.message, "error"); area.innerHTML = ""; return; }
+  if (!data || data.length === 0) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No matching students found.</p></div>`;
+    return;
+  }
+
+  area.innerHTML = data.map(row => `
+    <div class="card" style="margin-top:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <strong>${escapeHtml(row.student_name)}</strong> — ${escapeHtml(row.registration_number)}, ${escapeHtml(row.class)}, Year ${escapeHtml(row.due_year)}<br/>
+          Due: ₹${Number(row.due_amount).toFixed(2)} · Received: ₹${Number(row.total_received).toFixed(2)} ·
+          Discount: ₹${Number(row.total_discount).toFixed(2)} · <strong>Balance: ₹${Number(row.balance_due).toFixed(2)}</strong>
+        </div>
+        ${myAccess.level === "full" ? `
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-ghost btn-sm" onclick='openEditDueModal(${JSON.stringify(row)})'>Edit</button>
+            <button class="btn btn-danger btn-sm" onclick='confirmDeleteDue("${row.due_id}", "${escapeHtml(row.student_name)}")'>Delete</button>
+          </div>` : ""}
+      </div>
+      <div id="history-${row.due_id}" style="margin-top:10px;"><em>Loading history…</em></div>
+    </div>
+  `).join("");
+
+  for (const row of data) {
+    loadPaymentHistory(row.due_id);
+  }
+}
+
+async function loadPaymentHistory(dueId) {
+  const { data, error } = await supabaseClient
+    .from("due_payments")
+    .select("*")
+    .eq("due_id", dueId)
+    .order("payment_date", { ascending: false });
+
+  const el = document.getElementById(`history-${dueId}`);
+  if (error) { el.innerHTML = `<span class="badge badge-danger">Failed to load history</span>`; return; }
+  if (!data || data.length === 0) { el.innerHTML = `<em>No payments received yet.</em>`; return; }
+
+  el.innerHTML = `
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Date</th><th>Amount</th><th>Discount</th><th>Mode</th><th>Description</th>${myAccess.level === "full" ? "<th></th>" : ""}</tr></thead>
+        <tbody>
+          ${data.map(p => `
+            <tr>
+              <td>${escapeHtml(p.payment_date)}</td>
+              <td>₹${Number(p.amount).toFixed(2)}</td>
+              <td>₹${Number(p.discount).toFixed(2)}</td>
+              <td>${escapeHtml(p.mode)}</td>
+              <td>${p.description ? escapeHtml(p.description) : "-"}</td>
+              ${myAccess.level === "full" ? `<td><button class="btn btn-danger btn-sm" onclick='confirmDeletePayment("${p.payment_id}", "${dueId}")'>Delete</button></td>` : ""}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openEditDueModal(row) {
+  openModal({
+    title: "Edit due record",
+    subtitle: `${row.student_name} — ${row.registration_number}`,
+    bodyHtml: `
+      <div class="field"><label for="eName">Student Name</label><input class="input" id="eName" value="${escapeHtml(row.student_name)}" /></div>
+      <div class="field"><label for="eReg">Registration Number</label><input class="input" id="eReg" value="${escapeHtml(row.registration_number)}" /></div>
+      <div class="field"><label for="eClass">Class</label><input class="input" id="eClass" value="${escapeHtml(row.class)}" /></div>
+      <div class="field"><label for="eYear">Year</label><input class="input" id="eYear" value="${escapeHtml(row.due_year)}" /></div>
+      <div class="field"><label for="eAmount">Amount Due</label><input class="input" id="eAmount" type="number" min="0" step="0.01" value="${row.due_amount}" /></div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveEditBtn">Save changes</button>
+    `,
+    onOpen: () => { document.getElementById("saveEditBtn").onclick = () => saveDueEdit(row); }
+  });
+}
+
+async function saveDueEdit(existing) {
+  const updated = {
+    student_name: document.getElementById("eName").value.trim(),
+    registration_number: document.getElementById("eReg").value.trim(),
+    class: document.getElementById("eClass").value.trim(),
+    due_year: document.getElementById("eYear").value.trim(),
+    due_amount: parseFloat(document.getElementById("eAmount").value)
+  };
+  if (!updated.student_name || !updated.registration_number || !updated.class || !updated.due_year || !(updated.due_amount >= 0)) {
+    showToast("Please fill all fields with valid values.", "error");
+    return;
+  }
+
+  const btn = document.getElementById("saveEditBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const record = await withAuditStamp(updated, { isNew: false });
+  const { error } = await supabaseClient
+    .from("student_old_dues").update(record).eq("due_id", existing.due_id);
+
+  if (error) {
+    showToast("Update failed: " + error.message, "error");
+    btn.disabled = false; btn.innerHTML = "Save changes";
+    return;
+  }
+  await logAudit("student_old_dues", existing.due_id, "update", existing, record);
+  showToast("Due record updated.", "success");
+  closeModal();
+  await runStudentSearch(document.getElementById("studentSearchInput").value.trim());
+  await loadYearSummary();
+  await loadList();
+}
+
+function confirmDeleteDue(dueId, label) {
+  openModal({
+    title: "Delete due record?",
+    subtitle: "This also deletes every payment recorded against it. This cannot be undone.",
+    bodyHtml: `<p>Delete the due record for "<strong>${label}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelDueBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelDueBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("student_old_dues").delete().eq("due_id", dueId);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("student_old_dues", dueId, "delete", { student_name: label }, null);
+        closeModal();
+        showToast("Due record deleted.", "success");
+        await runStudentSearch(document.getElementById("studentSearchInput").value.trim());
+        await loadYearSummary();
+        await loadList();
+      };
+    }
+  });
+}
+
+function confirmDeletePayment(paymentId, dueId) {
+  openModal({
+    title: "Delete payment?",
+    subtitle: "This cannot be undone.",
+    bodyHtml: `<p>Delete this payment record?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="confirmDelPayBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("confirmDelPayBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("due_payments").delete().eq("payment_id", paymentId);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("due_payments", paymentId, "delete", null, null);
+        closeModal();
+        showToast("Payment deleted.", "success");
+        await runStudentSearch(document.getElementById("studentSearchInput").value.trim());
+        await loadYearSummary();
+      };
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
