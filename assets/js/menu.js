@@ -67,6 +67,17 @@ const MENU_ITEMS = [
   limitedAccess: ["viewer"],         // can add (admission/readmission) only
   order: 3
    },
+   
+{
+  id: "old-dues",
+  label: "Old Dues",
+  icon: "💰",
+  file: "pages/old-dues.html",
+  group: "Fees",
+  fullAccess: ["admin"],
+  limitedAccess: ["accountant", "teacher"],
+  order: 20
+},
    {
   id: "fee-collection",
   label: "Fee Collection",
