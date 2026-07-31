@@ -10,7 +10,7 @@
 <script src="../assets/js/config.js"></script>
 <script src="../assets/js/menu.js"></script>
 <script src="../assets/js/common.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 
 <style>
   /* Page-specific only — everything else comes from common.css */
@@ -73,6 +73,10 @@
   .chart-card { padding: 18px; }
   .chart-card h3 { margin: 0 0 12px; font-size: 0.95rem; opacity: 0.85; }
   .chart-box { position: relative; height: 260px; }
+  .chart-box .chart-msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; font-size: 0.85rem; opacity: 0.55; padding: 0 12px;
+  }
 
   .tap-hint { font-size: 0.72rem; opacity: 0.55; margin-top: 8px; }
 
@@ -130,19 +134,19 @@
   <div class="charts-grid">
     <div class="card chart-card">
       <h3>Account Balances</h3>
-      <div class="chart-box"><canvas id="chartBalances"></canvas></div>
+      <div class="chart-box" id="boxBalances"><canvas id="chartBalances"></canvas></div>
     </div>
     <div class="card chart-card">
       <h3>Receivables vs Payables</h3>
-      <div class="chart-box"><canvas id="chartDues"></canvas></div>
+      <div class="chart-box" id="boxDues"><canvas id="chartDues"></canvas></div>
     </div>
     <div class="card chart-card">
       <h3>Student Due Breakdown</h3>
-      <div class="chart-box"><canvas id="chartStudentDue"></canvas></div>
+      <div class="chart-box" id="boxStudentDue"><canvas id="chartStudentDue"></canvas></div>
     </div>
     <div class="card chart-card">
       <h3>Top 5 Creditors by Due</h3>
-      <div class="chart-box"><canvas id="chartTopCreditors"></canvas></div>
+      <div class="chart-box" id="boxTopCreditors"><canvas id="chartTopCreditors"></canvas></div>
     </div>
   </div>
 </div>
@@ -348,7 +352,38 @@ function openCreditorModal() {
 /* ===================================================================== */
 function destroyChart(key) { if (charts[key]) { charts[key].destroy(); delete charts[key]; } }
 
+function chartMsg(boxId, text) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  let msg = box.querySelector(".chart-msg");
+  const canvas = box.querySelector("canvas");
+  if (text) {
+    if (canvas) canvas.style.visibility = "hidden";
+    if (!msg) { msg = document.createElement("div"); msg.className = "chart-msg"; box.appendChild(msg); }
+    msg.textContent = text;
+  } else {
+    if (canvas) canvas.style.visibility = "visible";
+    if (msg) msg.remove();
+  }
+}
+
+function chartJsAvailable() {
+  if (typeof Chart === "undefined") {
+    ["boxBalances","boxDues","boxStudentDue","boxTopCreditors"].forEach(id =>
+      chartMsg(id, "Chart library failed to load — check your network/CDN access and refresh."));
+    return false;
+  }
+  return true;
+}
+
 function renderBalancesChart(byAccount) {
+  if (!chartJsAvailable()) return;
+  if ((byAccount.cash + byAccount.bank + byAccount.phonepe) === 0) {
+    destroyChart("balances");
+    chartMsg("boxBalances", "No balance yet — add cash inflow/fee entries to see this chart.");
+    return;
+  }
+  chartMsg("boxBalances", null);
   destroyChart("balances");
   const ctx = document.getElementById("chartBalances");
   charts.balances = new Chart(ctx, {
@@ -369,6 +404,13 @@ function renderBalancesChart(byAccount) {
 }
 
 function renderStudentDueChart(dues) {
+  if (!chartJsAvailable()) return;
+  if ((dues.monthly + dues.admission + dues.old) === 0) {
+    destroyChart("studentDue");
+    chartMsg("boxStudentDue", "No student dues outstanding right now.");
+    return;
+  }
+  chartMsg("boxStudentDue", null);
   destroyChart("studentDue");
   const ctx = document.getElementById("chartStudentDue");
   charts.studentDue = new Chart(ctx, {
@@ -391,8 +433,15 @@ function renderStudentDueChart(dues) {
 }
 
 function renderTopCreditorsChart(creditors) {
-  destroyChart("topCreditors");
+  if (!chartJsAvailable()) return;
   const top = [...creditors].sort((a,b)=> Number(b.total_due)-Number(a.total_due)).slice(0,5);
+  if (!top.length || top.every(c => Number(c.total_due) <= 0)) {
+    destroyChart("topCreditors");
+    chartMsg("boxTopCreditors", "No creditor dues outstanding right now.");
+    return;
+  }
+  chartMsg("boxTopCreditors", null);
+  destroyChart("topCreditors");
   const ctx = document.getElementById("chartTopCreditors");
   charts.topCreditors = new Chart(ctx, {
     type: "bar",
@@ -415,11 +464,18 @@ function renderTopCreditorsChart(creditors) {
 }
 
 function renderDuesVsBalanceChart() {
-  destroyChart("dues");
+  if (!chartJsAvailable()) return;
   const totalBalance = lastBalances.cash + lastBalances.bank + lastBalances.phonepe;
   const totalStudentDue = lastDues.monthly + lastDues.admission + lastDues.old;
   const totalCreditorDue = lastCreditors.reduce((s, r) => s + (Number(r.total_due) || 0), 0);
 
+  if ((totalBalance + totalStudentDue + totalCreditorDue) === 0) {
+    destroyChart("dues");
+    chartMsg("boxDues", "No data yet.");
+    return;
+  }
+  chartMsg("boxDues", null);
+  destroyChart("dues");
   const ctx = document.getElementById("chartDues");
   charts.dues = new Chart(ctx, {
     type: "bar",
