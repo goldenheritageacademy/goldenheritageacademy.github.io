@@ -10,6 +10,8 @@
 <script src="../assets/js/menu.js"></script>
 <script src="../assets/js/common.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   .fr-tabs { display: flex; gap: 8px; margin: 18px 0; flex-wrap: wrap; }
   .fr-tab-btn { padding: 8px 16px; border-radius: var(--radius-md,8px); border: 1px solid var(--ink,#ccc);
@@ -88,7 +90,16 @@
       <div class="fr-filter-row">
         <div class="field"><label for="mMonth">Month</label>
           <input class="input" type="month" id="mMonth" /></div>
+        <div class="field"><label for="mStatusFilter">Status</label>
+          <select class="input" id="mStatusFilter">
+            <option value="">All</option>
+            <option value="paid">Full Paid</option>
+            <option value="partial">Partial</option>
+            <option value="due">Due</option>
+          </select></div>
         <button class="btn btn-primary" id="mGenBtn">Generate</button>
+        <button class="btn btn-ghost" id="mExportExcelBtn">⬇ Export Excel</button>
+        <button class="btn btn-ghost" id="mExportPdfBtn">⬇ Export PDF</button>
       </div>
       <div id="mResultArea"></div>
     </section>
@@ -122,6 +133,8 @@
 const PAGE_ID = "fee-due-report"; // must match menu.js id
 let myAccess = null;
 let lastDateRangeRows = []; // for export
+let lastMonthwiseRows = []; // for filter + export
+let lastMonthwiseMeta = null; // { yy, mm }
 
 const CLASS_LABELS = {
   "4":"Class 4","5":"Class 5","6":"Class 6","7":"Class 7","8":"Class 8",
@@ -242,6 +255,9 @@ async function init() {
   document.getElementById("sSearch").addEventListener("keydown", e=>{ if(e.key==="Enter") studentSearch(); });
   document.getElementById("cGenBtn").addEventListener("click", generateClasswise);
   document.getElementById("mGenBtn").addEventListener("click", generateMonthwise);
+  document.getElementById("mStatusFilter").addEventListener("change", renderMonthwiseTable);
+  document.getElementById("mExportExcelBtn").addEventListener("click", exportMonthwiseExcel);
+  document.getElementById("mExportPdfBtn").addEventListener("click", exportMonthwisePDF);
   document.getElementById("dGenBtn").addEventListener("click", generateDateRange);
   document.getElementById("dExportBtn").addEventListener("click", exportDateRange);
 }
@@ -443,6 +459,9 @@ async function generateMonthwise() {
   });
   const grandCollected = cashSum+bankSum+phonepeSum+discountSum;
 
+  lastMonthwiseRows = dueRows;
+  lastMonthwiseMeta = { yy, mm };
+
   resultArea.innerHTML = `
     <h4>Due Status for ${MONTH_NAMES[mm-1]} ${yy}</h4>
     <div class="fr-cards">
@@ -451,14 +470,7 @@ async function generateMonthwise() {
     </div>
     <div class="table-wrap"><table class="data">
       <thead><tr><th>Reg No</th><th>Name</th><th>Class</th><th>Status</th><th class="num">Amount Due</th></tr></thead>
-      <tbody>${dueRows.length ? dueRows.map(r=>`<tr>
-        <td>${escapeHtml(r.s.reg_no)}</td><td>${escapeHtml(r.s.name)}</td>
-        <td>${escapeHtml(CLASS_LABELS[r.s.class]||r.s.class)}</td>
-        <td>${r.status==="paid"?'<span class="badge badge-success">Paid</span>':
-             r.status==="partial"?'<span class="badge badge-warning">Partial</span>':
-             '<span class="badge badge-danger">Due</span>'}</td>
-        <td class="num">${r.status==="paid"?"—":money(r.due)}</td>
-      </tr>`).join("") : `<tr><td colspan="5">No students had a monthly fee applicable this month.</td></tr>`}</tbody>
+      <tbody id="mDueTableBody"></tbody>
     </table></div>
 
     <h4 style="margin-top:24px;">Amount Collected During ${MONTH_NAMES[mm-1]} ${yy}</h4>
@@ -474,6 +486,76 @@ async function generateMonthwise() {
         <td class="num">${money(phonepeSum)}</td><td class="num">${money(discountSum)}</td></tr></tbody>
     </table></div>
   `;
+  renderMonthwiseTable();
+}
+
+/* Renders (or re-renders) just the due-status table body, applying the
+   Full Paid / Partial / Due filter without re-querying the database. */
+function renderMonthwiseTable() {
+  const tbody = document.getElementById("mDueTableBody");
+  if (!tbody) return; // no report generated yet
+  const rows = getFilteredMonthwiseRows();
+  tbody.innerHTML = rows.length ? rows.map(r=>`<tr>
+        <td>${escapeHtml(r.s.reg_no)}</td><td>${escapeHtml(r.s.name)}</td>
+        <td>${escapeHtml(CLASS_LABELS[r.s.class]||r.s.class)}</td>
+        <td>${r.status==="paid"?'<span class="badge badge-success">Paid</span>':
+             r.status==="partial"?'<span class="badge badge-warning">Partial</span>':
+             '<span class="badge badge-danger">Due</span>'}</td>
+        <td class="num">${r.status==="paid"?"—":money(r.due)}</td>
+      </tr>`).join("") : `<tr><td colspan="5">No students match this filter.</td></tr>`;
+}
+
+function getFilteredMonthwiseRows() {
+  const filter = document.getElementById("mStatusFilter").value;
+  if (!filter) return lastMonthwiseRows;
+  return lastMonthwiseRows.filter(r => r.status === filter);
+}
+
+function exportMonthwiseExcel() {
+  if (!lastMonthwiseMeta) { showToast("Generate a report first.", "error"); return; }
+  const rows = getFilteredMonthwiseRows();
+  if (!rows.length) { showToast("No rows match the current filter.", "error"); return; }
+  const { yy, mm } = lastMonthwiseMeta;
+  const aoa = [["Reg No","Name","Class","Status","Amount Due"]];
+  rows.forEach(r=>{
+    aoa.push([
+      r.s.reg_no, r.s.name, CLASS_LABELS[r.s.class]||r.s.class,
+      r.status==="paid"?"Paid":r.status==="partial"?"Partial":"Due",
+      r.status==="paid"?0:Number(r.due)
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Month-wise Due");
+  XLSX.writeFile(wb, `monthwise_due_${MONTH_NAMES[mm-1]}_${yy}.xlsx`);
+}
+
+function exportMonthwisePDF() {
+  if (!lastMonthwiseMeta) { showToast("Generate a report first.", "error"); return; }
+  const rows = getFilteredMonthwiseRows();
+  if (!rows.length) { showToast("No rows match the current filter.", "error"); return; }
+  const { yy, mm } = lastMonthwiseMeta;
+  const filterSelect = document.getElementById("mStatusFilter");
+  const filterLabel = filterSelect.options[filterSelect.selectedIndex].text;
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(14);
+  doc.text(`Month-wise Due Report — ${MONTH_NAMES[mm-1]} ${yy}`, 14, 16);
+  doc.setFontSize(10);
+  doc.text(`Filter: ${filterLabel}`, 14, 22);
+  doc.autoTable({
+    startY: 28,
+    head: [["Reg No","Name","Class","Status","Amount Due"]],
+    body: rows.map(r=>[
+      r.s.reg_no, r.s.name, CLASS_LABELS[r.s.class]||r.s.class,
+      r.status==="paid"?"Paid":r.status==="partial"?"Partial":"Due",
+      r.status==="paid"?"—":money(r.due)
+    ]),
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [176,141,87] }
+  });
+  doc.save(`monthwise_due_${MONTH_NAMES[mm-1]}_${yy}.pdf`);
 }
 
 /* =====================================================================
