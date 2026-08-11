@@ -239,6 +239,8 @@ function computeAdmissionLedger(feeMasterRows, receipts){
   return { charged, paid, due: Math.max(0, charged-paid) };
 }
 function money(n){ return "₹" + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+function todayStr(){ const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function formatDateOnly(s){ if(!s) return "—"; const d = new Date(s+"T00:00:00"); return isNaN(d) ? escapeHtml(String(s)) : d.toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}); }
 
 /* =====================================================================
    INIT
@@ -272,14 +274,14 @@ async function init() {
   document.getElementById("collectOtherBtn").addEventListener("click", openOtherModal);
 
   document.getElementById("tplMonthlyBtn").addEventListener("click", ()=>downloadTemplate(
-    ["reg_no","months","amount_cash","amount_bank","amount_phonepe","discount","remark"],
-    ["2026001","2026-05;2026-06","1500","0","500","0","optional"], "monthly_fee_template.xlsx"));
+    ["reg_no","received_date","months","amount_cash","amount_bank","amount_phonepe","discount","remark"],
+    ["2026001", todayStr(), "2026-05;2026-06","1500","0","500","0","optional"], "monthly_fee_template.xlsx"));
   document.getElementById("tplAdmissionBtn").addEventListener("click", ()=>downloadTemplate(
-    ["reg_no","amount_cash","amount_bank","amount_phonepe","discount","remark"],
-    ["2026001","2000","0","0","0","optional"], "admission_readmission_template.xlsx"));
+    ["reg_no","received_date","amount_cash","amount_bank","amount_phonepe","discount","remark"],
+    ["2026001", todayStr(), "2000","0","0","0","optional"], "admission_readmission_template.xlsx"));
   document.getElementById("tplOtherBtn").addEventListener("click", ()=>downloadTemplate(
-    ["reg_no","category_name","amount_cash","amount_bank","amount_phonepe","discount","remark"],
-    ["2026001","Transport Fee","500","0","0","0","optional"], "other_fee_template.xlsx"));
+    ["reg_no","received_date","category_name","amount_cash","amount_bank","amount_phonepe","discount","remark"],
+    ["2026001", todayStr(), "Transport Fee","500","0","0","0","optional"], "other_fee_template.xlsx"));
 
   document.getElementById("uploadMonthlyBtn").addEventListener("click", ()=>bulkUpload("monthly"));
   document.getElementById("uploadAdmissionBtn").addEventListener("click", ()=>bulkUpload("admission"));
@@ -337,7 +339,7 @@ async function loadContext() {
   const regNo = currentStudent.reg_no;
   const [{ data: feeMaster }, { data: receipts }, { data: categories }] = await Promise.all([
     supabaseClient.from("fee_master").select("*").eq("student_reg_no", regNo),
-    supabaseClient.from("fee_receipts").select("*").eq("student_reg_no", regNo).order("recorded_at", { ascending: false }),
+    supabaseClient.from("fee_receipts").select("*").eq("student_reg_no", regNo).order("received_date", { ascending: false }).order("recorded_at", { ascending: false }),
     supabaseClient.from("fee_categories").select("*").eq("active", true).order("name")
   ]);
 
@@ -377,8 +379,9 @@ function renderMonthly() {
   const canEdit = myAccess.level === "full";
   document.getElementById("monthlyHistory").innerHTML = hist.length ? `
     <div class="table-wrap"><table class="data">
-      <thead><tr><th>Date</th><th>Months</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEdit?"<th></th>":""}</tr></thead>
+      <thead><tr><th>Received</th><th>Recorded</th><th>Months</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEdit?"<th></th>":""}</tr></thead>
       <tbody>${hist.map(r=>`<tr>
+        <td>${formatDateOnly(r.received_date)}</td>
         <td>${formatDateTime(r.recorded_at)}</td>
         <td>${(r.for_months||[]).join(", ") || "—"}</td>
         <td>${money(r.amount_cash)}</td><td>${money(r.amount_bank)}</td><td>${money(r.amount_phonepe)}</td>
@@ -406,6 +409,7 @@ function openMonthlyModal() {
       <div class="field"><label>Months this payment covers</label>
         <div class="fc-months-pick" id="monthPickBox">${pickList}</div>
       </div>
+      <div class="field"><label>Fee Receive Date</label><input class="input" type="date" id="mReceivedDate" value="${todayStr()}" /></div>
       <div class="fc-amt-grid">
         <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="mCash" value="0" /></div>
         <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="mBank" value="0" /></div>
@@ -436,6 +440,7 @@ function openMonthlyModal() {
         if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
         const months = Array.from(document.querySelectorAll(".monthPick:checked")).map(cb=>cb.value);
         const remark = document.getElementById("mRemark").value.trim();
+        const receivedDate = document.getElementById("mReceivedDate").value || todayStr();
 
         const btn = document.getElementById("mSaveBtn");
         btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
@@ -443,7 +448,8 @@ function openMonthlyModal() {
           student_reg_no: currentStudent.reg_no, fee_type: "monthly",
           for_months: months.length ? months : null,
           amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
-          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString(),
+          received_date: receivedDate
         };
         const { error } = await supabaseClient.from("fee_receipts").insert(payload);
         if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Payment"; return; }
@@ -471,8 +477,9 @@ function renderAdmission() {
   const canEditA = myAccess.level === "full";
   document.getElementById("admissionHistory").innerHTML = hist.length ? `
     <div class="table-wrap"><table class="data">
-      <thead><tr><th>Date</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEditA?"<th></th>":""}</tr></thead>
+      <thead><tr><th>Received</th><th>Recorded</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEditA?"<th></th>":""}</tr></thead>
       <tbody>${hist.map(r=>`<tr>
+        <td>${formatDateOnly(r.received_date)}</td>
         <td>${formatDateTime(r.recorded_at)}</td>
         <td>${money(r.amount_cash)}</td><td>${money(r.amount_bank)}</td><td>${money(r.amount_phonepe)}</td>
         <td>${money(r.discount)}</td><td>${escapeHtml(r.remark||"")}</td>
@@ -489,6 +496,7 @@ function openAdmissionModal() {
     title: "Collect Admission / Readmission Fee",
     subtitle: `${currentStudent.name} (${currentStudent.reg_no}) — Due: ${money(ctx.admissionLedger.due)}`,
     bodyHtml: `
+      <div class="field"><label>Fee Receive Date</label><input class="input" type="date" id="adReceivedDate" value="${todayStr()}" /></div>
       <div class="fc-amt-grid">
         <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="adCash" value="0" /></div>
         <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="adBank" value="0" /></div>
@@ -507,12 +515,14 @@ function openAdmissionModal() {
         const discount = parseFloat(document.getElementById("adDiscount").value)||0;
         if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
         const remark = document.getElementById("adRemark").value.trim();
+        const receivedDate = document.getElementById("adReceivedDate").value || todayStr();
         const btn = document.getElementById("adSaveBtn");
         btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
         const payload = {
           student_reg_no: currentStudent.reg_no, fee_type: "admission_readmission",
           amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
-          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString(),
+          received_date: receivedDate
         };
         const { error } = await supabaseClient.from("fee_receipts").insert(payload);
         if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Payment"; return; }
@@ -533,10 +543,11 @@ function renderOther() {
   const canEditO = myAccess.level === "full";
   document.getElementById("otherHistory").innerHTML = hist.length ? `
     <div class="table-wrap"><table class="data">
-      <thead><tr><th>Date</th><th>Category</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEditO?"<th></th>":""}</tr></thead>
+      <thead><tr><th>Received</th><th>Recorded</th><th>Category</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEditO?"<th></th>":""}</tr></thead>
       <tbody>${hist.map(r=>{
         const cat = ctx.categories.find(c=>c.category_id===r.category_id);
         return `<tr>
+        <td>${formatDateOnly(r.received_date)}</td>
         <td>${formatDateTime(r.recorded_at)}</td><td>${escapeHtml(cat?cat.name:"—")}</td>
         <td>${money(r.amount_cash)}</td><td>${money(r.amount_bank)}</td><td>${money(r.amount_phonepe)}</td>
         <td>${money(r.discount)}</td><td>${escapeHtml(r.remark||"")}</td>
@@ -565,6 +576,7 @@ function openOtherModal() {
         <input class="input" id="oNewCatName" placeholder="New category name" />
         <button class="btn btn-accent" id="oNewCatSaveBtn" type="button">Add</button>
       </div>
+      <div class="field"><label>Fee Receive Date</label><input class="input" type="date" id="oReceivedDate" value="${todayStr()}" /></div>
       <div class="fc-amt-grid">
         <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="oCash" value="0" /></div>
         <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="oBank" value="0" /></div>
@@ -601,12 +613,14 @@ function openOtherModal() {
         const discount = parseFloat(document.getElementById("oDiscount").value)||0;
         if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
         const remark = document.getElementById("oRemark").value.trim();
+        const receivedDate = document.getElementById("oReceivedDate").value || todayStr();
         const btn = document.getElementById("oSaveBtn");
         btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
         const payload = {
           student_reg_no: currentStudent.reg_no, fee_type: "other", category_id: categoryId,
           amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
-          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString(),
+          received_date: receivedDate
         };
         const { error } = await supabaseClient.from("fee_receipts").insert(payload);
         if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Payment"; return; }
@@ -648,6 +662,7 @@ function openEditReceiptModal(receiptId) {
     subtitle: `${currentStudent.name} (${currentStudent.reg_no}) — ${formatDateTime(r.recorded_at)}`,
     bodyHtml: `
       ${extraFieldHtml}
+      <div class="field"><label>Fee Receive Date</label><input class="input" type="date" id="erReceivedDate" value="${escapeHtml(r.received_date || todayStr())}" /></div>
       <div class="fc-amt-grid">
         <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="erCash" value="${r.amount_cash}" /></div>
         <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="erBank" value="${r.amount_bank}" /></div>
@@ -667,9 +682,10 @@ function openEditReceiptModal(receiptId) {
         if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
         const remark = document.getElementById("erRemark").value.trim();
 
+        const receivedDate = document.getElementById("erReceivedDate").value || todayStr();
         const updated = {
           amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
-          remark: remark || null
+          remark: remark || null, received_date: receivedDate
         };
         if (r.fee_type === "monthly") {
           const raw = document.getElementById("erMonths").value.trim();
@@ -762,9 +778,23 @@ async function bulkUpload(kind) {
     if (cash+bank+phonepe+discount <= 0) { fail++; errors.push(`${regNo}: no amount entered`); continue; }
     const remark = row.remark ? String(row.remark).trim() : null;
 
+    let receivedDate = String(row.received_date || "").trim();
+    if (receivedDate) {
+      // Excel may hand back a Date object or a serial number depending on cell formatting.
+      if (row.received_date instanceof Date && !isNaN(row.received_date)) {
+        const d = row.received_date;
+        receivedDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      } else if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedDate)) {
+        fail++; errors.push(`${regNo}: received_date must be YYYY-MM-DD`); continue;
+      }
+    } else {
+      receivedDate = todayStr();
+    }
+
     let payload = {
       student_reg_no: regNo, amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
-      remark, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+      remark, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString(),
+      received_date: receivedDate
     };
 
     if (kind === "monthly") {
