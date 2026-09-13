@@ -26,6 +26,16 @@ const MENU_ITEMS = [
     limitedAccess: [],                            // can read/enter only
     order: 1
   },
+   {
+  id: "Result",
+  label: "Result",
+  icon: "🧾",
+  file: "https://school-mark-sheet-result-generator.ai.studio/",
+  group: "Accounts",
+  fullAccess: ["admin"],
+  limitedAccess: ["editor"],
+  order: 12
+},
    
 {
   id: "voucher-setup",
