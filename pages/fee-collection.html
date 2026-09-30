@@ -833,17 +833,29 @@ async function bulkUpload(kind) {
     if (cash+bank+phonepe+discount <= 0) { fail++; errors.push(`${regNo}: no amount entered`); return; }
     const remark = row.remark ? String(row.remark).trim() : null;
 
-    let receivedDate = String(row.received_date || "").trim();
-    if (receivedDate) {
-      // Excel may hand back a Date object or a serial number depending on cell formatting.
-      if (row.received_date instanceof Date && !isNaN(row.received_date)) {
-        const d = row.received_date;
-        receivedDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-      } else if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedDate)) {
-        fail++; errors.push(`${regNo}: received_date must be YYYY-MM-DD`); return;
-      }
+    let receivedDate = "";
+    const rd = row.received_date;
+    if (typeof rd === "number" && rd > 0) {
+      // Excel serial number -> YYYY-MM-DD (no timezone issues)
+      const p = XLSX.SSF.parse_date_code(rd);
+      receivedDate = `${p.y}-${String(p.m).padStart(2,"0")}-${String(p.d).padStart(2,"0")}`;
+    } else if (rd instanceof Date && !isNaN(rd)) {
+      receivedDate = `${rd.getFullYear()}-${String(rd.getMonth()+1).padStart(2,"0")}-${String(rd.getDate()).padStart(2,"0")}`;
     } else {
-      receivedDate = todayStr();
+      const s = String(rd || "").trim();
+      if (!s) {
+        receivedDate = todayStr();
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        receivedDate = s;
+      } else {
+        // also accept DD/MM/YYYY or DD-MM-YYYY typed as text
+        const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+        if (m) {
+          receivedDate = `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+        } else {
+          fail++; errors.push(`${regNo}: received_date must be YYYY-MM-DD`); return;
+        }
+      }
     }
 
     let payload = {
