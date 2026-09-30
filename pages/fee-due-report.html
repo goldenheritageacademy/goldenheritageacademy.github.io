@@ -228,6 +228,36 @@ function money(n){ return "₹" + Number(n||0).toLocaleString(undefined,{minimum
 function receiptTotal(r){ return Number(r.amount_cash)+Number(r.amount_bank)+Number(r.amount_phonepe)+Number(r.discount); }
 
 /* =====================================================================
+   PAGINATED FETCH HELPERS
+   Supabase/PostgREST silently returns at most 1000 rows per request.
+   Any report that loads many students' receipts in one call was getting
+   a truncated list, so some students' payments were missing and their
+   paid months showed as "Due". These helpers always pull every row.
+   ===================================================================== */
+async function fetchAll(makeQuery, pageSize = 1000) {
+  let all = [], from = 0;
+  while (true) {
+    const { data, error } = await makeQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+// Loads all rows of `table` for the given reg numbers: chunked so the
+// .in() URL stays short, and paginated inside each chunk.
+async function fetchByRegNos(table, regNos, chunkSize = 50) {
+  const chunks = [];
+  for (let i = 0; i < regNos.length; i += chunkSize) chunks.push(regNos.slice(i, i + chunkSize));
+  const parts = await Promise.all(chunks.map(ch => fetchAll(() =>
+    supabaseClient.from(table).select("*").in("student_reg_no", ch)
+      .order("student_reg_no", { ascending: true })
+      .order("recorded_at", { ascending: true }))));
+  return parts.flat();
+}
+
+/* =====================================================================
    INIT
    ===================================================================== */
 async function init() {
@@ -358,18 +388,21 @@ async function generateClasswise() {
   const resultArea = document.getElementById("cResultArea");
   resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
 
-  let q = supabaseClient.from("student_master").select("*");
-  if (klass) q = q.eq("class", klass);
-  if (!includeInactive) q = q.eq("status", "active");
-  const { data: students, error } = await q;
-  if (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
-  if (!students || students.length === 0) { resultArea.innerHTML = `<div class="empty-state"><p>No students match.</p></div>`; return; }
-
-  const regNos = students.map(s=>s.reg_no);
-  const [{ data: feeMaster }, { data: receipts }] = await Promise.all([
-    supabaseClient.from("fee_master").select("*").in("student_reg_no", regNos),
-    supabaseClient.from("fee_receipts").select("*").in("student_reg_no", regNos)
-  ]);
+  let students, feeMaster, receipts;
+  try {
+    students = await fetchAll(() => {
+      let q = supabaseClient.from("student_master").select("*").order("reg_no", { ascending: true });
+      if (klass) q = q.eq("class", klass);
+      if (!includeInactive) q = q.eq("status", "active");
+      return q;
+    });
+    if (!students.length) { resultArea.innerHTML = `<div class="empty-state"><p>No students match.</p></div>`; return; }
+    const regNos = students.map(s=>s.reg_no);
+    [feeMaster, receipts] = await Promise.all([
+      fetchByRegNos("fee_master", regNos),
+      fetchByRegNos("fee_receipts", regNos)
+    ]);
+  } catch (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
 
   const today = new Date();
   let sumMonthlyDue=0, sumAdmDue=0, sumReceived=0;
@@ -416,14 +449,15 @@ async function generateMonthwise() {
   const resultArea = document.getElementById("mResultArea");
   resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
 
-  const { data: students, error } = await supabaseClient.from("student_master").select("*");
-  if (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
-
-  const regNos = students.map(s=>s.reg_no);
-  const [{ data: feeMaster }, { data: receipts }] = await Promise.all([
-    supabaseClient.from("fee_master").select("*").in("student_reg_no", regNos),
-    supabaseClient.from("fee_receipts").select("*").in("student_reg_no", regNos)
-  ]);
+  let students, feeMaster, receipts;
+  try {
+    students = await fetchAll(() => supabaseClient.from("student_master").select("*").order("reg_no", { ascending: true }));
+    const regNos = students.map(s=>s.reg_no);
+    [feeMaster, receipts] = await Promise.all([
+      fetchByRegNos("fee_master", regNos),
+      fetchByRegNos("fee_receipts", regNos)
+    ]);
+  } catch (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
 
   const today = new Date();
   const key = ymKey(yy,mm);
@@ -573,11 +607,16 @@ async function generateDateRange() {
   const startIso = new Date(start+"T00:00:00").toISOString();
   const endIso = new Date(end+"T23:59:59").toISOString();
 
-  let q = supabaseClient.from("fee_receipts").select("*, student_master(name, class)")
-    .gte("recorded_at", startIso).lte("recorded_at", endIso).order("recorded_at", { ascending: false });
-  if (feeType) q = q.eq("fee_type", feeType);
-  const { data, error } = await q;
-  if (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
+  let data;
+  try {
+    data = await fetchAll(() => {
+      let q = supabaseClient.from("fee_receipts").select("*, student_master(name, class)")
+        .gte("recorded_at", startIso).lte("recorded_at", endIso)
+        .order("recorded_at", { ascending: false }).order("student_reg_no", { ascending: true });
+      if (feeType) q = q.eq("fee_type", feeType);
+      return q;
+    });
+  } catch (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
 
   let rows = data || [];
   if (klass) rows = rows.filter(r => r.student_master && r.student_master.class === klass);
