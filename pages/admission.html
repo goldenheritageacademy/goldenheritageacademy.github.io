@@ -597,15 +597,23 @@ async function loadList() {
 }
 
 let studentsCache = {};
+let feeRowsCache = {};
 
 async function openEditModal(regNo) {
   const { data: existing, error } = await supabaseClient.from("student_master").select("*").eq("reg_no", regNo).single();
   if (error) { showToast("Could not load student: " + error.message, "error"); return; }
   studentsCache[regNo] = existing;
 
+  // Current fees = latest admission row + latest monthly row from fee_master
+  const { data: feeRows } = await supabaseClient.from("fee_master").select("*")
+    .eq("student_reg_no", regNo).order("recorded_at", { ascending: false });
+  const admFeeRow = (feeRows || []).find(f => f.type === "admission") || null;
+  const monFeeRow = (feeRows || []).find(f => f.type === "monthly") || null;
+  feeRowsCache[regNo] = { admFeeRow, monFeeRow };
+
   openModal({
     title: "Edit student",
-    subtitle: "Core details only — fee history is managed via Readmission.",
+    subtitle: "Full access — all details including admission date and fees can be edited.",
     bodyHtml: `
       <div class="field"><label>Name</label>
         <input class="input" id="eName" value="${escapeHtml(existing.name)}" /></div>
@@ -628,6 +636,12 @@ async function openEditModal(regNo) {
         <input class="input" id="eSection" value="${escapeHtml(existing.section || '')}" /></div>
       <div class="field"><label>Roll No</label>
         <input class="input" id="eRoll" value="${escapeHtml(existing.roll_no || '')}" /></div>
+      <div class="field"><label>Admission Date</label>
+        <input class="input" type="date" id="eDate" value="${escapeHtml(String(existing.admission_date || '').slice(0,10))}" /></div>
+      <div class="field"><label>Admission Fee</label>
+        <input class="input" type="number" min="0" step="0.01" id="eAdmFee" value="${admFeeRow ? escapeHtml(String(admFeeRow.amount)) : ''}" /></div>
+      <div class="field"><label>Monthly Fee</label>
+        <input class="input" type="number" min="0" step="0.01" id="eMonFee" value="${monFeeRow ? escapeHtml(String(monFeeRow.amount)) : ''}" /></div>
       <div class="field"><label>Remark</label>
         <input class="input" id="eRemark" value="${escapeHtml(existing.remark || '')}" /></div>
     `,
@@ -641,8 +655,23 @@ async function openEditModal(regNo) {
 
 async function saveEdit(regNo) {
   const existing = studentsCache[regNo];
+  const { admFeeRow, monFeeRow } = feeRowsCache[regNo] || {};
+
+  const name = document.getElementById("eName").value.trim();
+  const admDate = document.getElementById("eDate").value;
+  const admFeeRaw = document.getElementById("eAdmFee").value.trim();
+  const monFeeRaw = document.getElementById("eMonFee").value.trim();
+  const admFee = admFeeRaw === "" ? null : parseFloat(admFeeRaw);
+  const monFee = monFeeRaw === "" ? null : parseFloat(monFeeRaw);
+
+  if (!name) { showToast("Name is required.", "error"); return; }
+  if (!admDate) { showToast("Admission date is required.", "error"); return; }
+  if ((admFee !== null && (isNaN(admFee) || admFee < 0)) || (monFee !== null && (isNaN(monFee) || monFee < 0))) {
+    showToast("Fees must be valid non-negative numbers.", "error"); return;
+  }
+
   const updated = {
-    name: document.getElementById("eName").value.trim(),
+    name,
     father_name: document.getElementById("eFather").value.trim(),
     mobile_no: document.getElementById("eMobile").value.trim(),
     class: document.getElementById("eClass").value,
@@ -650,14 +679,47 @@ async function saveEdit(regNo) {
     section: document.getElementById("eSection").value.trim() || null,
     roll_no: document.getElementById("eRoll").value.trim() || null,
     remark: document.getElementById("eRemark").value.trim() || null,
+    admission_date: admDate,
     updated_by: myAccess.profile.user_id
   };
   const btn = document.getElementById("eSaveBtn");
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  const resetBtn = () => { btn.disabled = false; btn.textContent = "Save changes"; };
 
   const { error } = await supabaseClient.from("student_master").update(updated).eq("reg_no", regNo);
-  if (error) { showToast("Update failed: " + error.message, "error"); return; }
+  if (error) { showToast("Update failed: " + error.message, "error"); resetBtn(); return; }
   await logAudit("student_master", regNo, "update", existing, updated);
+
+  // Fee changes: correct the existing fee_master row in place, or create one if missing
+  const feeErrors = [];
+  const applyFee = async (type, newAmount, row) => {
+    if (newAmount === null) return;                       // left blank -> untouched
+    if (row && Number(row.amount) === newAmount) return;  // unchanged
+    if (row) {
+      let q = supabaseClient.from("fee_master").update({ amount: newAmount });
+      q = row.id !== undefined
+        ? q.eq("id", row.id)
+        : q.eq("student_reg_no", regNo).eq("type", type).eq("recorded_at", row.recorded_at);
+      const { error: e } = await q;
+      if (e) { feeErrors.push(`${type}: ${e.message}`); return; }
+      await logAudit("fee_master", regNo, "update", { type, amount: row.amount }, { type, amount: newAmount });
+    } else {
+      const newRow = { student_reg_no: regNo, type, amount: newAmount, remark: null,
+        recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString() };
+      const { error: e } = await supabaseClient.from("fee_master").insert(newRow);
+      if (e) { feeErrors.push(`${type}: ${e.message}`); return; }
+      await logAudit("fee_master", regNo, "insert", null, newRow);
+    }
+  };
+  await applyFee("admission", admFee, admFeeRow);
+  await applyFee("monthly", monFee, monFeeRow);
+
+  if (feeErrors.length) {
+    showToast("Student saved, but fee update failed: " + feeErrors.join("; "), "error");
+    resetBtn();
+    await loadList();
+    return;
+  }
   showToast("Student updated.", "success");
   closeModal();
   await loadList();
