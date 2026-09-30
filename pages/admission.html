@@ -597,23 +597,25 @@ async function loadList() {
 }
 
 let studentsCache = {};
-let feeRowsCache = {};
+let feeCache = {};
 
 async function openEditModal(regNo) {
   const { data: existing, error } = await supabaseClient.from("student_master").select("*").eq("reg_no", regNo).single();
   if (error) { showToast("Could not load student: " + error.message, "error"); return; }
   studentsCache[regNo] = existing;
 
-  // Current fees = latest admission row + latest monthly row from fee_master
-  const { data: feeRows } = await supabaseClient.from("fee_master").select("*")
-    .eq("student_reg_no", regNo).order("recorded_at", { ascending: false });
-  const admFeeRow = (feeRows || []).find(f => f.type === "admission") || null;
-  const monFeeRow = (feeRows || []).find(f => f.type === "monthly") || null;
-  feeRowsCache[regNo] = { admFeeRow, monFeeRow };
+  // Latest admission + monthly fee rows from fee_master
+  const { data: feeData, error: feeLoadErr } = await supabaseClient
+    .from("fee_master").select("*").eq("student_reg_no", regNo)
+    .order("recorded_at", { ascending: false });
+  if (feeLoadErr) { showToast("Could not load fees: " + feeLoadErr.message, "error"); return; }
+  const latestAdm = (feeData || []).find(r => r.type === "admission") || null;
+  const latestMon = (feeData || []).find(r => r.type === "monthly") || null;
+  feeCache[regNo] = { admission: latestAdm, monthly: latestMon };
 
   openModal({
     title: "Edit student",
-    subtitle: "Full access — all details including admission date and fees can be edited.",
+    subtitle: "Edit student details and fees. Fee changes update the latest fee record.",
     bodyHtml: `
       <div class="field"><label>Name</label>
         <input class="input" id="eName" value="${escapeHtml(existing.name)}" /></div>
@@ -636,12 +638,10 @@ async function openEditModal(regNo) {
         <input class="input" id="eSection" value="${escapeHtml(existing.section || '')}" /></div>
       <div class="field"><label>Roll No</label>
         <input class="input" id="eRoll" value="${escapeHtml(existing.roll_no || '')}" /></div>
-      <div class="field"><label>Admission Date</label>
-        <input class="input" type="date" id="eDate" value="${escapeHtml(String(existing.admission_date || '').slice(0,10))}" /></div>
       <div class="field"><label>Admission Fee</label>
-        <input class="input" type="number" min="0" step="0.01" id="eAdmFee" value="${admFeeRow ? escapeHtml(String(admFeeRow.amount)) : ''}" /></div>
+        <input class="input" type="number" min="0" step="0.01" id="eAdmFee" value="${latestAdm ? latestAdm.amount : ''}" /></div>
       <div class="field"><label>Monthly Fee</label>
-        <input class="input" type="number" min="0" step="0.01" id="eMonFee" value="${monFeeRow ? escapeHtml(String(monFeeRow.amount)) : ''}" /></div>
+        <input class="input" type="number" min="0" step="0.01" id="eMonFee" value="${latestMon ? latestMon.amount : ''}" /></div>
       <div class="field"><label>Remark</label>
         <input class="input" id="eRemark" value="${escapeHtml(existing.remark || '')}" /></div>
     `,
@@ -655,23 +655,9 @@ async function openEditModal(regNo) {
 
 async function saveEdit(regNo) {
   const existing = studentsCache[regNo];
-  const { admFeeRow, monFeeRow } = feeRowsCache[regNo] || {};
-
-  const name = document.getElementById("eName").value.trim();
-  const admDate = document.getElementById("eDate").value;
-  const admFeeRaw = document.getElementById("eAdmFee").value.trim();
-  const monFeeRaw = document.getElementById("eMonFee").value.trim();
-  const admFee = admFeeRaw === "" ? null : parseFloat(admFeeRaw);
-  const monFee = monFeeRaw === "" ? null : parseFloat(monFeeRaw);
-
-  if (!name) { showToast("Name is required.", "error"); return; }
-  if (!admDate) { showToast("Admission date is required.", "error"); return; }
-  if ((admFee !== null && (isNaN(admFee) || admFee < 0)) || (monFee !== null && (isNaN(monFee) || monFee < 0))) {
-    showToast("Fees must be valid non-negative numbers.", "error"); return;
-  }
-
+  const fees = feeCache[regNo] || { admission: null, monthly: null };
   const updated = {
-    name,
+    name: document.getElementById("eName").value.trim(),
     father_name: document.getElementById("eFather").value.trim(),
     mobile_no: document.getElementById("eMobile").value.trim(),
     class: document.getElementById("eClass").value,
@@ -679,47 +665,55 @@ async function saveEdit(regNo) {
     section: document.getElementById("eSection").value.trim() || null,
     roll_no: document.getElementById("eRoll").value.trim() || null,
     remark: document.getElementById("eRemark").value.trim() || null,
-    admission_date: admDate,
     updated_by: myAccess.profile.user_id
   };
-  const btn = document.getElementById("eSaveBtn");
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
-  const resetBtn = () => { btn.disabled = false; btn.textContent = "Save changes"; };
+  const newAdm = document.getElementById("eAdmFee").value.trim();
+  const newMon = document.getElementById("eMonFee").value.trim();
 
-  const { error } = await supabaseClient.from("student_master").update(updated).eq("reg_no", regNo);
+  const btn = document.getElementById("eSaveBtn");
+  const resetBtn = () => { btn.disabled = false; btn.textContent = "Save changes"; };
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  // 1) student_master — .select() so we can detect blocked/no-match updates
+  const { data: sRows, error } = await supabaseClient
+    .from("student_master").update(updated).eq("reg_no", regNo).select();
   if (error) { showToast("Update failed: " + error.message, "error"); resetBtn(); return; }
+  if (!sRows || sRows.length === 0) {
+    showToast("Update blocked: no student row changed (check permissions/RLS).", "error"); resetBtn(); return;
+  }
   await logAudit("student_master", regNo, "update", existing, updated);
 
-  // Fee changes: correct the existing fee_master row in place, or create one if missing
-  const feeErrors = [];
-  const applyFee = async (type, newAmount, row) => {
-    if (newAmount === null) return;                       // left blank -> untouched
-    if (row && Number(row.amount) === newAmount) return;  // unchanged
+  // 2) fees — update latest row of that type, or insert one if none exists
+  async function saveFee(type, rawVal) {
+    if (rawVal === "") return { skipped: true };
+    const amount = parseFloat(rawVal);
+    if (isNaN(amount) || amount < 0) return { error: `Invalid ${type} fee.` };
+    const row = fees[type];
+    if (row && Number(row.amount) === amount) return { skipped: true };   // unchanged
+
     if (row) {
-      let q = supabaseClient.from("fee_master").update({ amount: newAmount });
-      q = row.id !== undefined
-        ? q.eq("id", row.id)
-        : q.eq("student_reg_no", regNo).eq("type", type).eq("recorded_at", row.recorded_at);
-      const { error: e } = await q;
-      if (e) { feeErrors.push(`${type}: ${e.message}`); return; }
-      await logAudit("fee_master", regNo, "update", { type, amount: row.amount }, { type, amount: newAmount });
+      let q = supabaseClient.from("fee_master").update({ amount }).eq("student_reg_no", regNo).eq("type", type);
+      q = (row.id !== undefined && row.id !== null) ? q.eq("id", row.id) : q.eq("recorded_at", row.recorded_at);
+      const { data, error } = await q.select();
+      if (error) return { error: error.message };
+      if (!data || data.length === 0) return { error: `${type} fee not saved (blocked by RLS or row not found).` };
+      await logAudit("fee_master", regNo, "update", { type, amount: row.amount }, { type, amount });
     } else {
-      const newRow = { student_reg_no: regNo, type, amount: newAmount, remark: null,
+      const newRow = { student_reg_no: regNo, type, amount, remark: updated.remark,
         recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString() };
-      const { error: e } = await supabaseClient.from("fee_master").insert(newRow);
-      if (e) { feeErrors.push(`${type}: ${e.message}`); return; }
+      const { data, error } = await supabaseClient.from("fee_master").insert(newRow).select();
+      if (error) return { error: error.message };
+      if (!data || data.length === 0) return { error: `${type} fee not saved (blocked by RLS).` };
       await logAudit("fee_master", regNo, "insert", null, newRow);
     }
-  };
-  await applyFee("admission", admFee, admFeeRow);
-  await applyFee("monthly", monFee, monFeeRow);
-
-  if (feeErrors.length) {
-    showToast("Student saved, but fee update failed: " + feeErrors.join("; "), "error");
-    resetBtn();
-    await loadList();
-    return;
+    return { ok: true };
   }
+
+  const r1 = await saveFee("admission", newAdm);
+  if (r1.error) { showToast(r1.error, "error"); resetBtn(); return; }
+  const r2 = await saveFee("monthly", newMon);
+  if (r2.error) { showToast(r2.error, "error"); resetBtn(); return; }
+
   showToast("Student updated.", "success");
   closeModal();
   await loadList();
