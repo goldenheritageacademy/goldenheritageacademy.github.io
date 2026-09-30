@@ -628,6 +628,8 @@ async function openEditModal(regNo) {
           ${Object.entries(CLASS_LABELS).map(([v,l]) =>
             `<option value="${v}" ${v===existing.class?'selected':''}>${l}</option>`).join("")}
         </select></div>
+      <div class="field"><label>Admission Date</label>
+        <input class="input" type="date" id="eAdmDate" value="${escapeHtml((existing.admission_date || '').slice(0,10))}" /></div>
       <div class="field"><label>Gender</label>
         <select class="input" id="eGender">
           <option value="" ${!existing.gender ? 'selected' : ''}>Select gender</option>
@@ -656,11 +658,16 @@ async function openEditModal(regNo) {
 async function saveEdit(regNo) {
   const existing = studentsCache[regNo];
   const fees = feeCache[regNo] || { admission: null, monthly: null };
+
+  const admDate = document.getElementById("eAdmDate").value;
+  if (!admDate) { showToast("Admission date cannot be empty.", "error"); return; }
+
   const updated = {
     name: document.getElementById("eName").value.trim(),
     father_name: document.getElementById("eFather").value.trim(),
     mobile_no: document.getElementById("eMobile").value.trim(),
     class: document.getElementById("eClass").value,
+    admission_date: admDate,
     gender: document.getElementById("eGender").value.trim() || null,
     section: document.getElementById("eSection").value.trim() || null,
     roll_no: document.getElementById("eRoll").value.trim() || null,
