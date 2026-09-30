@@ -12,7 +12,7 @@ const MENU_ITEMS = [
     icon: "🏠",
     file: "pages/dashboard.html",    // path loaded into the iframe
     group: "General",                // used to group items in the menu
-    fullAccess: ["admin", "editor", "viewer"],   // can edit/delete
+    fullAccess: ["admin", "editor", "viewer","accountent"],   // can edit/delete
     limitedAccess: [],                            // can read/enter only
     order: 1
   },
@@ -32,7 +32,7 @@ const MENU_ITEMS = [
   icon: "🧾",
   file: "https://school-mark-sheet-result-generator.ai.studio/",
   group: "Accounts",
-  fullAccess: ["admin"],
+  fullAccess: ["admin","accountent"],
   limitedAccess: ["editor"],
   order: 12
 },
@@ -44,7 +44,7 @@ const MENU_ITEMS = [
   file: "pages/voucher-setup.html",
   group: "Accounts",
   fullAccess: ["admin"],
-  limitedAccess: ["editor", "viewer"],
+  limitedAccess: ["editor", "viewer","accountent"],
   order: 10
 },
    {
@@ -54,7 +54,7 @@ const MENU_ITEMS = [
   file: "pages/payment.html",
   group: "Accounts",
   fullAccess: ["admin"],
-  limitedAccess: ["editor", "viewer"],
+  limitedAccess: ["editor", "viewer","accountent"],
   order: 8
    },
 /*{
@@ -74,7 +74,7 @@ const MENU_ITEMS = [
   file: "pages/creditor-voucher.html",
   group: "Accounts",
   fullAccess: ["admin"],
-  limitedAccess: ["editor", "viewer"],
+  limitedAccess: ["editor", "viewer","accountent"],
   order: 12
 },
    {
@@ -84,7 +84,7 @@ const MENU_ITEMS = [
   file: "pages/admission.html",
   group: "Academics",
   fullAccess: ["admin", "editor"],   // can add/edit/delete/deactivate
-  limitedAccess: ["viewer"],         // can add (admission/readmission) only
+  limitedAccess: ["viewer","accountent"],         // can add (admission/readmission) only
   order: 3
    },
    
@@ -105,7 +105,7 @@ const MENU_ITEMS = [
   file: "pages/fee-collection.html",
   group: "Accounts",
   fullAccess: ["admin", "editor"],   // can correct/delete receipts
-  limitedAccess: ["viewer"],         // can collect fees, cannot correct/delete
+  limitedAccess: ["viewer","accountent"],         // can collect fees, cannot correct/delete
   order: 4
 },
 {
@@ -115,7 +115,7 @@ const MENU_ITEMS = [
   file: "pages/fee-due-report.html",
   group: "Accounts",
   fullAccess: ["admin", "editor"],
-  limitedAccess: ["viewer"],         // read-only reports either way
+  limitedAccess: ["viewer","accountent"],         // read-only reports either way
   order: 5
 },
    {
@@ -125,7 +125,7 @@ const MENU_ITEMS = [
   file: "pages/cash-flow.html",
   group: "Accounts",
   fullAccess: ["admin"],            // can add/edit/delete everything
-  limitedAccess: ["editor", "viewer"], // can add records, cannot edit/delete
+  limitedAccess: ["editor", "viewer","accountent"], // can add records, cannot edit/delete
   order: 10                          // adjust to control menu position
    },
    {
@@ -135,7 +135,7 @@ const MENU_ITEMS = [
   file: "pages/staff.html",
   group: "Staff & Salary",
   fullAccess: ["admin"],
-  limitedAccess: ["accountant", "manager"],
+  limitedAccess: ["accountant", "manager","accountent"],
   order: 10
 },
 /*{
