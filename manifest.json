@@ -1,0 +1,25 @@
+{
+  "name": "Golden Heritage Academy Portal",
+  "short_name": "GHA Portal",
+  "description": "Student & Staff Management Portal for Golden Heritage Academy",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0284C7",
+  "theme_color": "#0284C7",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "assets/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["education", "productivity"]
+}

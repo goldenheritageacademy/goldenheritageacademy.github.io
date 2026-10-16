@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily Sheet — Golden Heritage Academy</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  /* ═══════════════════════════════════════════════════════════
+     DAILY SHEET — design tokens (self-contained, light theme)
+  ═══════════════════════════════════════════════════════════ */
+  .ds-root {
+    --ds-ink:#1b2430; --ds-muted:#6b7686; --ds-line:#e3e8ef; --ds-soft:#f5f7fa;
+    --ds-accent:#1f3a5f; --ds-accent-soft:#e8eef7;
+    --ds-green:#18794e; --ds-green-bg:#e6f4ec;
+    --ds-red:#b42318;   --ds-red-bg:#fdeceb;
+    --ds-amber:#a15c00; --ds-amber-bg:#fff4df;
+    --ds-blue:#175cd3;  --ds-blue-bg:#e8f0fe;
+    --ds-purple:#6941c6;--ds-purple-bg:#f1ebfd;
+    color: var(--ds-ink);
+  }
+
+  /* ── Control bar ─────────────────────────────────────── */
+  .ds-date-bar {
+    display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:22px;
+  }
+  .ds-date-bar .field { margin:0; }
+  .ds-nav-btn { padding:8px 12px; font-size:1.05rem; line-height:1; }
+
+  /* ── Report banner ───────────────────────────────────── */
+  .ds-banner {
+    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;
+    padding:18px 22px; margin-bottom:18px; border-radius:14px;
+    background:linear-gradient(120deg,#1f3a5f 0%,#2c5282 100%); color:#fff;
+  }
+  .ds-banner .b-school  { font-size:1.7rem; font-weight:800; letter-spacing:.02em; line-height:1.15; margin-bottom:6px; }
+  .ds-banner .b-eyebrow { font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; opacity:.75; font-weight:600; }
+  .ds-banner .b-date    { font-size:1.45rem; font-weight:700; margin-top:2px; }
+  .ds-banner .b-meta    { text-align:right; font-size:.8rem; opacity:.85; line-height:1.5; }
+
+  /* ── Panels ──────────────────────────────────────────── */
+  .ds-panel {
+    background:#fff; border:1px solid var(--ds-line); border-radius:14px;
+    box-shadow:0 1px 2px rgba(16,24,40,.04); margin-bottom:18px; overflow:hidden;
+  }
+  .ds-panel-head {
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:13px 20px; border-bottom:1px solid var(--ds-line); background:var(--ds-soft);
+  }
+  .ds-panel-head h2 {
+    margin:0; font-size:.8rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ds-accent); display:flex; align-items:center; gap:10px;
+  }
+  .ds-panel-head h2::before {
+    content:""; width:4px; height:16px; border-radius:2px; background:var(--ds-accent); display:inline-block;
+  }
+  .ds-count {
+    font-size:.72rem; font-weight:700; padding:3px 10px; border-radius:99px;
+    background:var(--ds-accent-soft); color:var(--ds-accent);
+  }
+  .ds-panel-body { padding:18px 20px; }
+  .ds-panel-body.flush { padding:0; }
+
+  /* ── Balance groups ──────────────────────────────────── */
+  .ds-group-label {
+    font-size:.68rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ds-muted); margin:0 0 8px;
+  }
+  .ds-group + .ds-group { margin-top:16px; padding-top:16px; border-top:1px dashed var(--ds-line); }
+  .ds-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+  .ds-card {
+    padding:13px 15px; border-radius:10px; border:1px solid var(--ds-line); background:#fff;
+  }
+  .ds-card .dc-label { font-size:.7rem; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--ds-muted); }
+  .ds-card .dc-value { font-size:1.3rem; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .ds-card .dc-delta { font-size:.72rem; margin-top:3px; font-weight:600; color:var(--ds-muted); }
+  .ds-card .dc-delta.good { color:var(--ds-green); }
+  .ds-card .dc-delta.bad  { color:var(--ds-red); }
+  .ds-card.dc-total { background:var(--ds-accent-soft); border-color:#c7d6ec; }
+  .ds-card.dc-total .dc-label { color:var(--ds-accent); }
+  .ds-card.dc-total .dc-value { color:var(--ds-accent); }
+  .ds-card.dc-neg .dc-value  { color:var(--ds-red); }
+  .ds-card.dc-due .dc-value  { color:var(--ds-amber); }
+  .ds-card.dc-due.dc-total   { background:var(--ds-amber-bg); border-color:#f5d9a4; }
+  .ds-card.dc-due.dc-total .dc-label, .ds-card.dc-due.dc-total .dc-value { color:var(--ds-amber); }
+
+  /* ── KPI strip (fee summary) ─────────────────────────── */
+  .ds-kpis { display:flex; flex-wrap:wrap; gap:10px; padding:16px 20px; border-bottom:1px solid var(--ds-line); }
+  .ds-kpi { flex:1 1 130px; padding:10px 14px; border-radius:10px; background:var(--ds-soft); border:1px solid var(--ds-line); }
+  .ds-kpi .k-label { font-size:.66rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--ds-muted); }
+  .ds-kpi .k-value { font-size:1.08rem; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .ds-kpi.k-main { background:var(--ds-green-bg); border-color:#b9e2cb; }
+  .ds-kpi.k-main .k-value { color:var(--ds-green); }
+
+  /* ── Tables ──────────────────────────────────────────── */
+  .ds-table-wrap { overflow-x:auto; }
+  table.ds-table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  .ds-table thead th {
+    background:var(--ds-soft); color:var(--ds-muted); font-size:.68rem; font-weight:700;
+    text-transform:uppercase; letter-spacing:.07em; text-align:left;
+    padding:10px 14px; border-bottom:1px solid var(--ds-line); white-space:nowrap;
+  }
+  .ds-table tbody td { padding:11px 14px; border-bottom:1px solid var(--ds-line); vertical-align:middle; }
+  .ds-table tbody tr:nth-child(even) td { background:#fafbfd; }
+  .ds-table tbody tr:hover td { background:#f1f5fb; }
+  .ds-table tfoot td {
+    padding:12px 14px; font-weight:700; background:var(--ds-accent-soft); color:var(--ds-accent);
+    border-top:2px solid #c7d6ec;
+  }
+  .ds-table th.num, .ds-table td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ds-table td.idx { color:var(--ds-muted); width:36px; font-variant-numeric:tabular-nums; }
+  .ds-table .nm   { font-weight:600; }
+  .ds-table .sub  { font-size:.74rem; color:var(--ds-muted); margin-top:2px; }
+  .ds-table .muted{ color:var(--ds-muted); }
+  .ds-table .for-months { font-size:.78rem; color:var(--ds-ink); margin-top:4px; font-weight:500; }
+  .cls-pill { display:inline-block; padding:2px 9px; border-radius:6px; background:var(--ds-soft); border:1px solid var(--ds-line); font-size:.76rem; font-weight:600; white-space:nowrap; }
+  .by-pill { display:inline-block; padding:2px 9px; border-radius:6px; background:var(--ds-soft); border:1px solid var(--ds-line); font-size:.76rem; font-weight:600; white-space:nowrap; }
+  .fallback-flag { color:var(--ds-amber); font-weight:700; cursor:help; }
+
+  /* Multi-mode stacked cells: amount and mode lines stay aligned row-for-row */
+  .split { display:flex; flex-direction:column; gap:5px; }
+  .split > span { min-height:24px; display:flex; align-items:center; }
+  td.num .split > span { justify-content:flex-end; }
+  .split-total { margin-top:4px; padding-top:4px; border-top:1px dashed var(--ds-line); font-size:.72rem; color:var(--ds-muted); font-weight:600; }
+
+  /* Fee-type tags */
+  .tag { display:inline-block; padding:2px 9px; border-radius:6px; font-size:.7rem; font-weight:700; letter-spacing:.03em; }
+  .tag-m { background:var(--ds-blue-bg);   color:var(--ds-blue); }
+  .tag-a { background:var(--ds-purple-bg); color:var(--ds-purple); }
+  .tag-o { background:var(--ds-amber-bg);  color:var(--ds-amber); }
+
+  /* Mode badges */
+  .mode { font-style:normal; display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:99px; font-size:.74rem; font-weight:700; }
+  .mode::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .m-cash    { background:var(--ds-green-bg);  color:var(--ds-green); }
+  .m-bank    { background:var(--ds-blue-bg);   color:var(--ds-blue); }
+  .m-phonepe { background:var(--ds-purple-bg); color:var(--ds-purple); }
+  .m-in      { background:var(--ds-green-bg);  color:var(--ds-green); }
+  .m-out     { background:var(--ds-red-bg);    color:var(--ds-red); }
+
+  .amt-in  { color:var(--ds-green); font-weight:600; }
+  .amt-out { color:var(--ds-red);   font-weight:600; }
+
+  .ds-empty { text-align:center; padding:26px 18px; color:var(--ds-muted); font-size:.86rem; }
+
+  /* ── Notices ─────────────────────────────────────────── */
+  .ds-note {
+    margin:14px 20px; padding:11px 14px; border-radius:10px; font-size:.8rem; line-height:1.5;
+    background:var(--ds-amber-bg); border:1px solid #f5d9a4; color:#6e4200;
+  }
+  .ds-note summary { cursor:pointer; font-weight:700; }
+  .ds-note ul { margin:8px 0 0 18px; padding:0; }
+
+  #loadingOverlay { display:none; text-align:center; padding:48px; font-size:1rem; color:var(--ds-muted); }
+  #loadingOverlay.show { display:block; }
+  .print-only { display:none; }
+
+  /* ── Print ───────────────────────────────────────────── */
+  @page { size:A4 landscape; margin:10mm; }
+  @media print {
+    .no-print, .btn, .ds-date-bar, .page-header { display:none !important; }
+    .print-only { display:block; }
+    body { background:#fff !important; }
+    .page-wrap { padding:0 !important; max-width:none !important; }
+    .ds-banner { background:#1f3a5f !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .ds-panel { box-shadow:none; break-inside:auto; }
+    .ds-panel, .ds-card, .ds-kpi, .ds-table * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .ds-table tr { break-inside:avoid; }
+    .ds-table thead { display:table-header-group; }
+    .ds-table tbody tr:hover td { background:inherit; }
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up ds-root">
+
+  <!-- ── Page header ───────────────────────────────────── -->
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Accounts</span>
+      <h1>Daily Sheet</h1>
+      <p>Complete financial snapshot for a selected date.</p>
+    </div>
+    <button class="btn btn-ghost" onclick="window.print()">🖨 Print</button>
+  </div>
+
+  <!-- ── Date picker ───────────────────────────────────── -->
+  <div class="ds-date-bar">
+    <button class="btn btn-ghost ds-nav-btn" id="prevBtn" title="Previous day">‹</button>
+    <div class="field">
+      <label for="dsDate">Select Date</label>
+      <input class="input" type="date" id="dsDate" />
+    </div>
+    <button class="btn btn-ghost ds-nav-btn" id="nextBtn" title="Next day">›</button>
+    <button class="btn btn-primary" id="loadBtn">View Sheet</button>
+    <button class="btn btn-ghost" id="recalcBtn" title="Force recalculate and update the snapshot cache">🔄 Recalculate</button>
+  </div>
+
+  <div id="loadingOverlay">⏳ Loading daily sheet…</div>
+
+  <div id="dsContent" style="display:none;">
+
+    <!-- Report banner -->
+    <div class="ds-banner">
+      <div>
+        <div class="b-school">Golden Heritage Academy</div>
+        <div class="b-eyebrow">Daily Accounts Sheet</div>
+        <div class="b-date" id="bannerDate">—</div>
+      </div>
+      <div class="b-meta" id="bannerMeta"></div>
+    </div>
+
+    <!-- 1 · OPENING -->
+    <section class="ds-panel">
+      <div class="ds-panel-head"><h2>Opening Position · Start of Day</h2></div>
+      <div class="ds-panel-body" id="openingBody"></div>
+    </section>
+
+    <!-- 2 · FEE COLLECTION -->
+    <section class="ds-panel">
+      <div class="ds-panel-head">
+        <h2>Fee Collection · Received Today</h2>
+        <span class="ds-count" id="feeCount">0</span>
+      </div>
+      <div id="feeKpis" class="ds-kpis" style="display:none;"></div>
+      <div class="ds-table-wrap">
+        <table class="ds-table" id="feeTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Student</th><th>Class</th><th>Fee For</th>
+              <th class="num">Received</th><th>Mode</th>
+              <th class="num">Discount</th><th>Remark</th><th>Received By</th>
+            </tr>
+          </thead>
+          <tbody id="feeBody"></tbody>
+          <tfoot id="feeFoot"></tfoot>
+        </table>
+      </div>
+      <div id="feeEmpty" class="ds-empty" style="display:none;">No fee receipts on this date.</div>
+      <div id="feeNotes"></div>
+    </section>
+
+    <!-- 3 · VOUCHERS -->
+    <section class="ds-panel">
+      <div class="ds-panel-head">
+        <h2>Payments · Vouchers Entered Today</h2>
+        <span class="ds-count" id="voucherCount">0</span>
+      </div>
+      <div class="ds-table-wrap">
+        <table class="ds-table" id="voucherTable">
+          <thead>
+            <tr>
+              <th>Voucher</th><th>Type</th><th>Paid To</th>
+              <th class="num">Amount</th><th>Mode</th><th>Category</th><th>Description</th><th>Paid By</th>
+            </tr>
+          </thead>
+          <tbody id="voucherBody"></tbody>
+          <tfoot id="voucherFoot"></tfoot>
+        </table>
+      </div>
+      <div id="voucherEmpty" class="ds-empty" style="display:none;">No payment vouchers on this date.</div>
+    </section>
+
+    <!-- 4 · CASH FLOW (hidden when empty) -->
+    <section class="ds-panel" id="cfSection" style="display:none;">
+      <div class="ds-panel-head">
+        <h2>Cash Flow · Inflow &amp; Outflow Today</h2>
+        <span class="ds-count" id="cfCount">0</span>
+      </div>
+      <div class="ds-table-wrap">
+        <table class="ds-table" id="cfTable">
+          <thead>
+            <tr><th>Direction</th><th>Category</th><th class="num">Amount</th><th>Description</th></tr>
+          </thead>
+          <tbody id="cfBody"></tbody>
+          <tfoot id="cfFoot"></tfoot>
+        </table>
+      </div>
+    </section>
+
+    <!-- 5 · TRANSFERS (hidden when empty) -->
+    <section class="ds-panel" id="xferSection" style="display:none;">
+      <div class="ds-panel-head">
+        <h2>Inter-Account Transfers Today</h2>
+        <span class="ds-count" id="xferCount">0</span>
+      </div>
+      <div class="ds-table-wrap">
+        <table class="ds-table" id="xferTable">
+          <thead>
+            <tr><th>From</th><th>To</th><th class="num">Amount</th><th>Description</th></tr>
+          </thead>
+          <tbody id="xferBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 6 · CLOSING -->
+    <section class="ds-panel">
+      <div class="ds-panel-head"><h2>Closing Position · End of Day</h2></div>
+      <div class="ds-panel-body" id="closingBody"></div>
+    </section>
+
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+/* ============================================================================
+   DAILY SHEET — daily-sheet.html
+   PAGE_ID must match the id added in menu.js.
+   ============================================================================ */
+const PAGE_ID = "daily-sheet";
+
+/* ── Helpers ───────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const E = escapeHtml;
+const inr = n => "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const today = () => ymd(new Date());
+const shiftDay = (s, n) => { const d = new Date(s + "T00:00:00"); d.setDate(d.getDate() + n); return ymd(d); };
+const fmtLong  = s => new Date(s + "T00:00:00").toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+const fmtShort = s => { const d = new Date(s + "T00:00:00"); return isNaN(d) ? String(s||"—") : d.toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }); };
+
+const MODE_LABEL = { cash:"Cash", bank:"Bank", phonepe:"PhonePe" };
+const ACCOUNT_LABELS = MODE_LABEL;
+const modeBadge = m => `<i class="mode m-${m||"cash"}">${MODE_LABEL[m] || E(m || "Cash")}</i>`;
+
+const CLASS_SHORT = {
+  "4":"4","5":"5","6":"6","7":"7","8":"8","9":"9","10":"10",
+  "11-arts":"11 Arts","11-science":"11 Science","12-arts":"12 Arts","12-science":"12 Science"
+};
+const classLabel = c => c ? (CLASS_SHORT[c] || String(c)) : "—";
+
+/* A receipt belongs to its "Fee Receive Date" only — never the entry date. */
+const effDate = r => r.received_date;
+
+/* Supabase returns max 1000 rows per request — page through everything. */
+async function fetchAll(buildQuery){
+  const size = 1000; let from = 0; const out = [];
+  while(true){
+    const { data, error } = await buildQuery().range(from, from + size - 1);
+    if(error) throw error;
+    out.push(...(data || []));
+    if(!data || data.length < size) break;
+    from += size;
+  }
+  return out;
+}
+
+/* ── Month formatting: ["2026-04","2026-05","2026-06"] → "Apr – Jun 2026" ──── */
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtMonths(raw){
+  let arr = raw;
+  if(typeof arr === "string") arr = arr.replace(/[{}"\[\]]/g,"").split(/[,;]/);
+  if(!Array.isArray(arr) || !arr.length) return "";
+  const clean = [...new Set(arr.map(s => String(s).trim()).filter(Boolean))];
+  const valid = clean.filter(k => /^\d{4}-\d{1,2}$/.test(k))
+    .map(k => { const [y,m] = k.split("-").map(Number); return { y, m, i: y*12 + m - 1 }; })
+    .sort((a,b) => a.i - b.i);
+  const invalid = clean.filter(k => !/^\d{4}-\d{1,2}$/.test(k));
+
+  const runs = [];
+  valid.forEach(v => {
+    const last = runs[runs.length - 1];
+    if(last && v.i === last[last.length - 1].i + 1) last.push(v); else runs.push([v]);
+  });
+  const txt = runs.map(run => {
+    const a = run[0], b = run[run.length - 1];
+    if(run.length === 1) return `${MONTH_NAMES[a.m-1]} ${a.y}`;
+    return a.y === b.y
+      ? `${MONTH_NAMES[a.m-1]} – ${MONTH_NAMES[b.m-1]} ${a.y}`
+      : `${MONTH_NAMES[a.m-1]} ${a.y} – ${MONTH_NAMES[b.m-1]} ${b.y}`;
+  });
+  return [...txt, ...invalid].join(", ");
+}
+
+/* ── Fee-due calculation engine (mirrors fee-collection.html) ─────────────── */
+function addMonth(y,m){ m++; if(m>12){m=1;y++;} return {y,m}; }
+function monthsBetweenInclusive(y1,m1,y2,m2){
+  const out=[]; let y=y1,m=m1,g=0;
+  while((y<y2||(y===y2&&m<=m2))&&g<600){out.push({y,m});const n=addMonth(y,m);y=n.y;m=n.m;g++;}
+  return out;
+}
+function getMonthlyRate(y,m,sorted){
+  const end=new Date(y,m,0,23,59,59);
+  let rate=sorted.length?Number(sorted[0].amount):0;
+  for(const r of sorted){if(new Date(r.recorded_at)<=end)rate=Number(r.amount);else break;}
+  return rate;
+}
+function computeMonthlyDue(student, sortedRates, monthlyReceipts, date){
+  const start = new Date(student.reactivated_at || student.admission_date);
+  if(isNaN(start)) return 0;
+  const endLimit = new Date(date + "T23:59:59");
+  const end = (student.status==="deactivated" && student.deactivate_date && new Date(student.deactivate_date) < endLimit)
+    ? new Date(student.deactivate_date) : endLimit;
+
+  const allMonths = monthsBetweenInclusive(start.getFullYear(), start.getMonth()+1, end.getFullYear(), end.getMonth()+1);
+  let pool = 0;
+  for(const r of monthlyReceipts){
+    if(effDate(r) <= date) pool += Number(r.amount_cash||0)+Number(r.amount_bank||0)+Number(r.amount_phonepe||0)+Number(r.discount||0);
+  }
+  let totalDue = 0;
+  for(const {y,m} of allMonths){
+    const rate = getMonthlyRate(y,m,sortedRates);
+    if(pool >= rate){ pool -= rate; }
+    else if(pool > 0){ totalDue += rate - pool; pool = 0; }
+    else { totalDue += rate; }
+  }
+  return totalDue;
+}
+
+/* ── Entering-user lookup ("Received By" / "Paid By") ──────────────────────── */
+let userNames = {};
+// payment.html stores the entering user on general_vouchers.entered_by (shown there as-is)
+const voucherUserId = v => v.entered_by || v.recorded_by || v.created_by || null;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const nameOfProfile = p => p && (p.full_name || p.name || p.display_name || p.username || p.email || null);
+const userCell = id => id
+  ? `<span class="by-pill">${E(userNames[id] || (UUID_RE.test(String(id)) ? "User " + String(id).slice(0,6) : String(id)))}</span>`
+  : `<span class="muted">—</span>`;
+
+async function resolveUsers(ids){
+  if(myAccess?.profile?.user_id && nameOfProfile(myAccess.profile)) userNames[myAccess.profile.user_id] = nameOfProfile(myAccess.profile);
+  // plain-text names (e.g. general_vouchers.entered_by) need no lookup — only UUIDs do
+  const need = [...new Set(ids.filter(Boolean))].filter(id => !userNames[id] && UUID_RE.test(String(id)));
+  if(!need.length) return;
+  const nameOf = nameOfProfile;
+  for(const table of ["profiles","user_profiles","users"]){
+    for(const col of ["user_id","id"]){
+      try {
+        const { data, error } = await supabaseClient.from(table).select("*").in(col, need);
+        if(error || !data || !data.length) continue;
+        data.forEach(p => { const n = nameOf(p); if(n) userNames[p[col]] = n; });
+        if(need.every(id => userNames[id])) return;
+      } catch(e){ /* try next */ }
+    }
+  }
+}
+
+/* ── State ─────────────────────────────────────────────────────────────────── */
+let myAccess = null;
+let cfCategories = {};
+
+/* ── Init ──────────────────────────────────────────────────────────────────── */
+async function init(){
+  myAccess = await getMyAccess(PAGE_ID);
+  if(!myAccess.profile) return;
+
+  $("dsDate").value = today();
+  $("loadBtn").onclick   = () => loadSheet(false);
+  $("recalcBtn").onclick = () => loadSheet(true);
+  $("prevBtn").onclick   = () => { $("dsDate").value = shiftDay($("dsDate").value || today(), -1); loadSheet(false); };
+  $("nextBtn").onclick   = () => { $("dsDate").value = shiftDay($("dsDate").value || today(),  1); loadSheet(false); };
+  $("dsDate").addEventListener("keydown", e => { if(e.key === "Enter") loadSheet(false); });
+
+  const { data: cats } = await supabaseClient.from("cash_flow_categories").select("category_id,name");
+  (cats||[]).forEach(c => cfCategories[c.category_id] = c.name);
+}
+
+/* ── Load everything once, then derive opening + closing from the same data ── */
+async function loadDataset(date){
+  const sb = supabaseClient;
+  const [receipts, undatedRes, vouchers, cfIn, cfOut, xfers, students, feeMaster, oldDues, duePayments, feeCats] =
+    await Promise.all([
+      // every receipt whose Fee Receive Date is on/before the day
+      fetchAll(() => sb.from("fee_receipts")
+        .select("receipt_id,student_reg_no,fee_type,category_id,for_months,amount_cash,amount_bank,amount_phonepe,discount,remark,received_date,recorded_at,recorded_by")
+        .lte("received_date", date)
+        .order("receipt_id")),
+      // count of receipts with no Fee Receive Date (cannot be placed on any day)
+      sb.from("fee_receipts").select("receipt_id", { count:"exact", head:true }).is("received_date", null),
+      fetchAll(() => sb.from("general_vouchers").select("*")
+        .eq("status","used").lte("voucher_date", date)
+        .order("voucher_date").order("voucher_seq")),
+      fetchAll(() => sb.from("cash_inflow").select("*").lte("txn_date", date).order("txn_date").order("amount")),
+      fetchAll(() => sb.from("cash_outflow").select("*").lte("txn_date", date).order("txn_date").order("amount")),
+      fetchAll(() => sb.from("fund_transfers").select("*").lte("txn_date", date).order("txn_date").order("amount")),
+      fetchAll(() => sb.from("student_master")
+        .select("reg_no,name,class,admission_date,reactivated_at,deactivate_date,status").order("reg_no")),
+      fetchAll(() => sb.from("fee_master")
+        .select("student_reg_no,type,amount,recorded_at").order("recorded_at").order("student_reg_no")),
+      fetchAll(() => sb.from("student_old_dues").select("due_amount").order("due_amount")),
+      fetchAll(() => sb.from("due_payments").select("amount,discount,payment_date")
+        .lte("payment_date", date).order("payment_date").order("amount")),
+      fetchAll(() => sb.from("fee_categories").select("category_id,name").order("category_id")),
+    ]);
+
+  return { receipts, undatedCount: undatedRes.count || 0, vouchers, cfIn, cfOut, xfers, students, feeMaster, oldDues, duePayments, feeCats };
+}
+
+/* ── Position (funds + dues) as at the END of a given date ─────────────────── */
+function computePosition(ds, date, idx){
+  const bal = { cash:0, bank:0, phonepe:0 };
+
+  ds.receipts.forEach(r => {
+    if(effDate(r) > date) return;
+    bal.cash    += Number(r.amount_cash    || 0);
+    bal.bank    += Number(r.amount_bank    || 0);
+    bal.phonepe += Number(r.amount_phonepe || 0);
+  });
+  ds.vouchers.forEach(v => {
+    if(v.voucher_date > date) return;
+    const m = v.payment_mode || "cash";
+    bal[m] = (bal[m] || 0) - Number(v.amount || 0);
+  });
+  ds.cfIn.forEach(r  => { if(r.txn_date <= date) bal.cash += Number(r.amount || 0); });
+  ds.cfOut.forEach(r => { if(r.txn_date <= date) bal.cash -= Number(r.amount || 0); });
+  ds.xfers.forEach(x => {
+    if(x.txn_date > date) return;
+    const amt = Number(x.amount || 0);
+    bal[x.from_account] = (bal[x.from_account] || 0) - amt;
+    bal[x.to_account]   = (bal[x.to_account]   || 0) + amt;
+  });
+
+  // Admission / readmission due
+  const admCharged = ds.feeMaster
+    .filter(r => r.type === "admission" || r.type === "readmission")
+    .reduce((s,r) => s + Number(r.amount||0), 0);
+  const admPaid = ds.receipts
+    .filter(r => r.fee_type === "admission_readmission" && effDate(r) <= date)
+    .reduce((s,r) => s + Number(r.amount_cash||0)+Number(r.amount_bank||0)+Number(r.amount_phonepe||0)+Number(r.discount||0), 0);
+  const admission_due = Math.max(0, admCharged - admPaid);
+
+  // Monthly due (per-student FIFO)
+  let monthly_due = 0;
+  for(const st of ds.students){
+    monthly_due += computeMonthlyDue(st, idx.ratesByReg.get(st.reg_no) || [], idx.monthlyByReg.get(st.reg_no) || [], date);
+  }
+
+  // Old due
+  const oldTotal = ds.oldDues.reduce((s,r) => s + Number(r.due_amount||0), 0);
+  const oldPaid  = ds.duePayments.reduce((s,r) => (r.payment_date <= date) ? s + Number(r.amount||0) + Number(r.discount||0) : s, 0);
+  const old_due  = Math.max(0, oldTotal - oldPaid);
+
+  return {
+    cash: bal.cash, bank: bal.bank, phonepe: bal.phonepe,
+    total_funds: bal.cash + bal.bank + bal.phonepe,
+    admission_due, monthly_due, old_due,
+    total_due: admission_due + monthly_due + old_due,
+  };
+}
+
+function buildIndex(ds){
+  const ratesByReg = new Map(), monthlyByReg = new Map();
+  ds.feeMaster.forEach(r => {
+    if(r.type !== "monthly") return;
+    if(!ratesByReg.has(r.student_reg_no)) ratesByReg.set(r.student_reg_no, []);
+    ratesByReg.get(r.student_reg_no).push(r);
+  });
+  ratesByReg.forEach(list => list.sort((a,b) => new Date(a.recorded_at) - new Date(b.recorded_at)));
+  ds.receipts.forEach(r => {
+    if(r.fee_type !== "monthly") return;
+    if(!monthlyByReg.has(r.student_reg_no)) monthlyByReg.set(r.student_reg_no, []);
+    monthlyByReg.get(r.student_reg_no).push(r);
+  });
+  return { ratesByReg, monthlyByReg, studentMap: new Map(ds.students.map(s => [s.reg_no, s])) };
+}
+
+/* ── Master load ───────────────────────────────────────────────────────────── */
+async function loadSheet(forceRecalc = false){
+  const date = $("dsDate").value;
+  if(!date){ showToast("Please select a date.", "error"); return; }
+
+  $("dsContent").style.display = "none";
+  $("loadingOverlay").classList.add("show");
+
+  try {
+    const ds  = await loadDataset(date);
+    const idx = buildIndex(ds);
+    const catMap = {}; ds.feeCats.forEach(c => catMap[c.category_id] = c.name);
+
+    const opening = computePosition(ds, shiftDay(date, -1), idx);
+    const closing = computePosition(ds, date, idx);
+
+    const dayFees = ds.receipts.filter(r => effDate(r) === date)
+      .sort((a,b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+    const dayVouchers = ds.vouchers.filter(v => v.voucher_date === date);
+    const dayIn   = ds.cfIn.filter(r => r.txn_date === date);
+    const dayOut  = ds.cfOut.filter(r => r.txn_date === date);
+    const dayXfer = ds.xfers.filter(r => r.txn_date === date);
+
+    await resolveUsers([...dayFees.map(r => r.recorded_by), ...dayVouchers.map(voucherUserId)]);
+
+    $("bannerDate").textContent = fmtLong(date);
+    $("bannerMeta").innerHTML = `Generated ${E(new Date().toLocaleString("en-IN"))}<br/>${dayFees.length} receipt${dayFees.length!==1?"s":""} · ${dayVouchers.length} voucher${dayVouchers.length!==1?"s":""}`;
+
+    renderPosition("openingBody", opening, null);
+    renderFeeTable(dayFees, idx.studentMap, catMap, ds.undatedCount);
+    renderVoucherTable(dayVouchers);
+    renderCFTable(dayIn, dayOut);
+    renderXferTable(dayXfer);
+    renderPosition("closingBody", closing, opening);
+
+    $("dsContent").style.display = "block";
+
+    // Keep the cached snapshot in step with the live figures
+    const { error: snapErr } = await supabaseClient.from("daily_closing_snapshot").upsert({
+      snap_date: date,
+      close_cash: closing.cash, close_phonepe: closing.phonepe, close_bank: closing.bank,
+      close_admission_due: closing.admission_due, close_monthly_due: closing.monthly_due, close_old_due: closing.old_due,
+      calculated_at: new Date().toISOString(), calculated_by: myAccess.profile.user_id,
+    }, { onConflict: "snap_date" });
+    if(snapErr) console.warn("Snapshot upsert failed:", snapErr.message);
+
+  } catch(err){
+    showToast("Failed to load daily sheet: " + (err.message || err), "error");
+    console.error(err);
+  } finally {
+    $("loadingOverlay").classList.remove("show");
+  }
+}
+
+/* ── RENDER: opening / closing position ────────────────────────────────────── */
+function deltaHtml(cur, prev, goodWhenUp){
+  if(prev == null) return "";
+  const d = cur - prev;
+  if(Math.abs(d) < 0.005) return `<div class="dc-delta">No change vs opening</div>`;
+  const up = d > 0, good = (up === goodWhenUp);
+  return `<div class="dc-delta ${good ? "good" : "bad"}">${up ? "▲" : "▼"} ${inr(Math.abs(d))} vs opening</div>`;
+}
+function posCard(label, val, opts = {}){
+  const { total=false, due=false, prev=null, goodWhenUp=true } = opts;
+  const cls = ["ds-card", total ? "dc-total" : "", due ? "dc-due" : "", (!due && val < 0) ? "dc-neg" : ""].join(" ");
+  return `<div class="${cls}">
+    <div class="dc-label">${label}</div>
+    <div class="dc-value">${inr(val)}</div>
+    ${deltaHtml(val, prev, goodWhenUp)}
+  </div>`;
+}
+function renderPosition(targetId, p, prev){
+  const pv = k => prev ? prev[k] : null;
+  $(targetId).innerHTML = `
+    <div class="ds-group">
+      <div class="ds-group-label">Funds in hand</div>
+      <div class="ds-cards">
+        ${posCard("Cash",    p.cash,    { prev:pv("cash") })}
+        ${posCard("Bank",    p.bank,    { prev:pv("bank") })}
+        ${posCard("PhonePe", p.phonepe, { prev:pv("phonepe") })}
+        ${posCard("Total Funds", p.total_funds, { total:true, prev:pv("total_funds") })}
+      </div>
+    </div>
+    <div class="ds-group">
+      <div class="ds-group-label">Outstanding dues</div>
+      <div class="ds-cards">
+        ${posCard("Admission Due", p.admission_due, { due:true, prev:pv("admission_due"), goodWhenUp:false })}
+        ${posCard("Monthly Due",   p.monthly_due,   { due:true, prev:pv("monthly_due"),   goodWhenUp:false })}
+        ${posCard("Old Due",       p.old_due,       { due:true, prev:pv("old_due"),       goodWhenUp:false })}
+        ${posCard("Total Due",     p.total_due,     { due:true, total:true, prev:pv("total_due"), goodWhenUp:false })}
+      </div>
+    </div>`;
+}
+
+/* ── RENDER: fee collection ────────────────────────────────────────────────── */
+function modeParts(r){
+  return [["cash", r.amount_cash], ["bank", r.amount_bank], ["phonepe", r.amount_phonepe]]
+    .map(([k,v]) => ({ k, amt: Number(v || 0) })).filter(p => p.amt > 0);
+}
+function feeForHtml(r, catMap){
+  if(r.fee_type === "monthly"){
+    const m = fmtMonths(r.for_months);
+    return `<span class="tag tag-m">Monthly</span><div class="for-months">${m ? E(m) : `<span class="muted">No month tagged (advance)</span>`}</div>`;
+  }
+  if(r.fee_type === "admission_readmission"){
+    return `<span class="tag tag-a">Admission / Readmission</span>`;
+  }
+  const cat = catMap[r.category_id];
+  return `<span class="tag tag-o">Other</span>${cat ? `<div class="for-months">${E(cat)}</div>` : ""}`;
+}
+
+function renderFeeTable(rows, studentMap, catMap, undatedCount){
+  const body = $("feeBody"), foot = $("feeFoot"), empty = $("feeEmpty"), tbl = $("feeTable"), kpis = $("feeKpis");
+  $("feeCount").textContent = `${rows.length} receipt${rows.length!==1?"s":""}`;
+
+  const notes = [];
+  if(undatedCount) notes.push(`<div class="ds-note"><b>${undatedCount} receipt${undatedCount!==1?"s":""}</b> in the system ${undatedCount!==1?"have":"has"} no Fee Receive Date, so ${undatedCount!==1?"they are":"it is"} not counted on any day's sheet. Open the student's Fee Collection history and edit the Receive Date to include ${undatedCount!==1?"them":"it"}.</div>`);
+  $("feeNotes").innerHTML = notes.join("");
+
+  if(!rows.length){
+    body.innerHTML = ""; foot.innerHTML = ""; tbl.style.display = "none"; kpis.style.display = "none"; empty.style.display = "block";
+    return;
+  }
+  tbl.style.display = "table"; empty.style.display = "none"; kpis.style.display = "flex";
+
+  const tot = { cash:0, bank:0, phonepe:0, disc:0 };
+  body.innerHTML = rows.map((r,i) => {
+    const st = studentMap.get(r.student_reg_no);
+    const parts = modeParts(r);
+    const total = parts.reduce((s,p) => s + p.amt, 0);
+    tot.cash += Number(r.amount_cash||0); tot.bank += Number(r.amount_bank||0);
+    tot.phonepe += Number(r.amount_phonepe||0); tot.disc += Number(r.discount||0);
+
+    const amountCell = parts.length
+      ? `<div class="split">${parts.map(p => `<span>${inr(p.amt)}</span>`).join("")}</div>` +
+        (parts.length > 1 ? `<div class="split-total">Total ${inr(total)}</div>` : "")
+      : `<span class="muted">—</span>`;
+    const modeCell = parts.length
+      ? `<div class="split">${parts.map(p => `<span>${modeBadge(p.k)}</span>`).join("")}</div>`
+      : `<span class="muted">Discount only</span>`;
+
+    return `<tr>
+      <td class="idx">${i+1}</td>
+      <td><div class="nm">${E(st?.name || r.student_reg_no)}</div><div class="sub">Reg ${E(r.student_reg_no)}</div></td>
+      <td><span class="cls-pill">${E(classLabel(st?.class))}</span></td>
+      <td>${feeForHtml(r, catMap)}</td>
+      <td class="num">${amountCell}</td>
+      <td>${modeCell}</td>
+      <td class="num">${Number(r.discount||0) > 0 ? inr(r.discount) : `<span class="muted">—</span>`}</td>
+      <td>${E(r.remark || "")}</td>
+      <td>${userCell(r.recorded_by)}</td>
+    </tr>`;
+  }).join("");
+
+  const grand = tot.cash + tot.bank + tot.phonepe;
+  foot.innerHTML = `<tr>
+    <td colspan="4">Total · ${rows.length} receipt${rows.length!==1?"s":""}</td>
+    <td class="num">${inr(grand)}</td>
+    <td></td>
+    <td class="num">${inr(tot.disc)}</td>
+    <td></td><td></td>
+  </tr>`;
+
+  const kpi = (label, val, main) => `<div class="ds-kpi ${main ? "k-main" : ""}"><div class="k-label">${label}</div><div class="k-value">${inr(val)}</div></div>`;
+  kpis.innerHTML =
+    kpi("Total Received", grand, true) +
+    kpi("Cash", tot.cash) + kpi("Bank", tot.bank) + kpi("PhonePe", tot.phonepe) +
+    kpi("Discount Given", tot.disc);
+}
+
+/* ── RENDER: vouchers ──────────────────────────────────────────────────────── */
+function renderVoucherTable(rows){
+  const body = $("voucherBody"), foot = $("voucherFoot"), empty = $("voucherEmpty"), tbl = $("voucherTable");
+  $("voucherCount").textContent = `${rows.length} voucher${rows.length!==1?"s":""}`;
+
+  if(!rows.length){ body.innerHTML = ""; foot.innerHTML = ""; tbl.style.display = "none"; empty.style.display = "block"; return; }
+  tbl.style.display = "table"; empty.style.display = "none";
+
+  const typeLbl = { cash:"Cash", creditor:"Creditor", salary:"Salary" };
+  body.innerHTML = rows.map(r => `<tr>
+    <td class="nm">${E(r.voucher_no)}</td>
+    <td>${E(typeLbl[r.voucher_type] || r.voucher_type || "")}</td>
+    <td>${E(r.payment_to || "")}</td>
+    <td class="num amt-out">${inr(r.amount)}</td>
+    <td>${modeBadge(r.payment_mode)}</td>
+    <td>${E(r.category || "")}</td>
+    <td>${E(r.description || "")}</td>
+    <td>${userCell(voucherUserId(r))}</td>
+  </tr>`).join("");
+
+  const tot = { cash:0, bank:0, phonepe:0 };
+  rows.forEach(r => { const m = r.payment_mode || "cash"; tot[m] = (tot[m]||0) + Number(r.amount||0); });
+  const grand = rows.reduce((s,r) => s + Number(r.amount||0), 0);
+  foot.innerHTML = `<tr>
+    <td colspan="3">Total · ${rows.length} voucher${rows.length!==1?"s":""}</td>
+    <td class="num">${inr(grand)}</td>
+    <td colspan="4" style="font-size:.76rem;font-weight:600;">
+      Cash ${inr(tot.cash)} &nbsp;·&nbsp; Bank ${inr(tot.bank)} &nbsp;·&nbsp; PhonePe ${inr(tot.phonepe)}
+    </td>
+  </tr>`;
+}
+
+/* ── RENDER: cash flow (section hidden when there is nothing) ──────────────── */
+function renderCFTable(inRows, outRows){
+  const sec = $("cfSection");
+  const combined = [
+    ...inRows.map(r  => ({ dir:"Inflow",  cat: cfCategories[r.category_id] || "—", amt: Number(r.amount||0), desc: r.description || "" })),
+    ...outRows.map(r => ({ dir:"Outflow", cat: cfCategories[r.category_id] || "—", amt: Number(r.amount||0), desc: r.description || "" })),
+  ];
+  if(!combined.length){ sec.style.display = "none"; $("cfBody").innerHTML = ""; $("cfFoot").innerHTML = ""; return; }
+  sec.style.display = "block";
+  $("cfCount").textContent = `${combined.length} entr${combined.length!==1?"ies":"y"}`;
+
+  $("cfBody").innerHTML = combined.map(r => `<tr>
+    <td><i class="mode ${r.dir==="Inflow" ? "m-in" : "m-out"}">${r.dir}</i></td>
+    <td>${E(r.cat)}</td>
+    <td class="num ${r.dir==="Inflow" ? "amt-in" : "amt-out"}">${r.dir==="Inflow" ? "+" : "−"} ${inr(r.amt)}</td>
+    <td>${E(r.desc)}</td>
+  </tr>`).join("");
+
+  const totalIn  = inRows.reduce((s,r)  => s + Number(r.amount||0), 0);
+  const totalOut = outRows.reduce((s,r) => s + Number(r.amount||0), 0);
+  $("cfFoot").innerHTML = `<tr>
+    <td colspan="2">Net Cash Flow</td>
+    <td class="num">${inr(totalIn - totalOut)}</td>
+    <td style="font-size:.76rem;font-weight:600;">In ${inr(totalIn)} &nbsp;·&nbsp; Out ${inr(totalOut)}</td>
+  </tr>`;
+}
+
+/* ── RENDER: transfers (section hidden when there is nothing) ──────────────── */
+function renderXferTable(rows){
+  const sec = $("xferSection");
+  if(!rows.length){ sec.style.display = "none"; $("xferBody").innerHTML = ""; return; }
+  sec.style.display = "block";
+  $("xferCount").textContent = `${rows.length} transfer${rows.length!==1?"s":""}`;
+
+  $("xferBody").innerHTML = rows.map(r => `<tr>
+    <td>${modeBadge(r.from_account)}</td>
+    <td>${modeBadge(r.to_account)}</td>
+    <td class="num nm">${inr(r.amount)}</td>
+    <td>${E(r.description || "")}</td>
+  </tr>`).join("");
+}
+
+/* ── Boot ──────────────────────────────────────────────────────────────────── */
+init();
+</script>
+</body>
+</html>

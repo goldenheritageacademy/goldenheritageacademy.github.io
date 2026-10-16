@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Page Title — Golden Heritage Academy Portal</title>
+
+<!-- ⬇⬇ every module page loads these shared files in this exact order (menu.js is no longer needed!) ⬇⬇ -->
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Section name</span>
+      <h2>Page Title</h2>
+    </div>
+    <!-- data-perm="create" is automatically shown only when the user has "Enter Data" permission -->
+    <button class="btn btn-primary" id="addBtn" data-perm="create" style="display:none">+ Add item</button>
+  </div>
+
+  <div id="listArea"><!-- table / cards rendered here by JS --></div>
+</div>
+
+<!-- required on every page that uses popups/toasts -->
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+// 1. Declare PAGE_ID matching page_key in Supabase `app_pages` (or leave as filename slug)
+const PAGE_ID = "REPLACE-WITH-PAGE-KEY";
+
+// myAccess = { profile, page, canView, canCreate, canEdit, canDelete, level }
+let myAccess = null;
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile || !myAccess.canView) return;
+
+  if (myAccess.canCreate) {
+    const addBtn = document.getElementById("addBtn");
+    addBtn.style.display = "inline-flex";
+    addBtn.onclick = () => openRecordModal(null);
+  }
+
+  await loadList();
+}
+
+async function loadList() {
+  // Fetch + render your data here.
+  // Use myAccess.canEdit for Edit buttons and myAccess.canDelete for Delete buttons:
+  //   ${myAccess.canEdit ? `<button class="btn btn-sm btn-ghost" data-perm="edit">Edit</button>` : ""}
+  //   ${myAccess.canDelete ? `<button class="btn btn-sm btn-danger" data-perm="delete">Delete</button>` : ""}
+}
+
+function openRecordModal(existing) {
+  // Use openModal({...}) from common.js
+}
+
+init();
+</script>
+</body>
+</html>

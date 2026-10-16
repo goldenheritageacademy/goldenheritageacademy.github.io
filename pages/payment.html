@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Payment — Golden Heritage Academy Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  .tab-row{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
+  .tab-btn{padding:8px 16px;border-radius:var(--radius-md);border:1px solid var(--ink);background:transparent;color:inherit;cursor:pointer;font-weight:600}
+  .tab-btn.active{background:var(--ink);color:var(--paper)}
+  .tab-panel{display:none}.tab-panel.active{display:block}
+  .rangebar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:.85em;margin-bottom:12px}
+  /* tiles */
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .tile{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--ink);border-radius:var(--radius-md);background:transparent;color:inherit;cursor:pointer;text-align:left}
+  .tile .ti{font-size:1.5rem}.tile .tl{font-weight:700;font-size:.92rem;display:block}.tile .ts{font-size:.74rem;opacity:.7}
+  .tile.active{background:var(--brass);color:var(--ink)}
+  @media(max-width:560px){.tile{flex-direction:column;text-align:center;gap:4px;padding:8px 4px}.tile .ts{display:none}}
+  /* compact form grid */
+  .cg{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px 12px;align-items:start}
+  .cg .field{margin:0}.cg label{font-size:.78rem;font-weight:600}
+  .vrow{display:flex;gap:6px}.vrow input{flex:1;min-width:0}
+  .vstat{font-size:.78rem;margin-top:4px;min-height:1.1em}.vok{color:#1b5e20}.vbad{color:#c62828}
+  .chips{display:flex;gap:6px}
+  .chip{flex:1;padding:8px 6px;border:1px solid var(--ink);border-radius:var(--radius-md);background:transparent;color:inherit;cursor:pointer;font-weight:600;font-size:.82rem}
+  .chip.on{background:var(--ink);color:var(--paper)}
+  .due-box{padding:8px 12px;border-radius:var(--radius-md);background:var(--paper);border:1px solid var(--ink);margin:10px 0 0;font-size:.85em}
+  .actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  /* upload */
+  .drop{border:2px dashed var(--ink);border-radius:var(--radius-md);padding:16px;text-align:center;cursor:pointer;margin-top:10px}
+  .drop.drag{background:var(--paper)}
+  .hint{font-size:.8rem;opacity:.8;margin:8px 0}
+  .ok{color:#1b5e20;font-weight:600}.bad{color:#c62828;font-weight:600}
+  tr.rbad td{background:rgba(198,40,40,.08)}
+  .filter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .sum{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;font-size:.85em}
+  .sum span{padding:4px 10px;border:1px solid var(--ink);border-radius:999px}
+  table.data{font-size:.84rem}
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Accounts</span>
+    <h1>Payment</h1>
+    <p>Cash, creditor and salary vouchers — one numbered register.</p>
+  </div>
+
+  <div class="tab-row">
+    <button class="tab-btn active" data-tab="New">➕ New Payment</button>
+    <button class="tab-btn" data-tab="Up">📤 Bulk Upload</button>
+    <button class="tab-btn" data-tab="View">📋 Voucher Register</button>
+  </div>
+
+  <!-- NEW PAYMENT -->
+  <div class="tab-panel active" id="tabNew">
+    <div class="card">
+      <div class="rangebar"><span id="rangeSummary">Loading range info…</span>
+        <button class="btn btn-accent btn-sm" id="genRangeBtn" style="display:none">+ Generate Voucher Range</button></div>
+      <div class="tiles" id="tilesNew"></div>
+      <div id="formArea"></div>
+      <div id="dueArea"></div>
+      <div class="actions"><button class="btn btn-primary" id="saveBtn">💾 Save voucher</button></div>
+    </div>
+  </div>
+
+  <!-- BULK UPLOAD -->
+  <div class="tab-panel" id="tabUp">
+    <div class="card">
+      <h2 style="margin:0 0 10px">Bulk upload</h2>
+      <div class="tiles" id="tilesUp"></div>
+      <div id="upArea" style="display:none">
+        <div class="actions" style="margin-top:0">
+          <button class="btn btn-accent btn-sm" id="sampleBtn">⬇ Download sample template</button>
+          <span class="hint" id="upCols" style="margin:0"></span>
+        </div>
+        <div class="drop" id="drop">📂 Drop Excel / CSV here or click to choose<input type="file" id="upFile" accept=".xlsx,.xls,.csv" style="display:none" /></div>
+        <div id="upPreview"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REGISTER -->
+  <div class="tab-panel" id="tabView">
+    <div class="card">
+      <div class="filter-grid">
+        <div class="field"><label>Date from</label><input class="input" id="fDateFrom" type="date" /></div>
+        <div class="field"><label>Date to</label><input class="input" id="fDateTo" type="date" /></div>
+        <div class="field"><label>Voucher no from</label><input class="input" id="fNoFrom" type="number" /></div>
+        <div class="field"><label>Voucher no to</label><input class="input" id="fNoTo" type="number" /></div>
+        <div class="field"><label>Category</label><select class="input" id="fType"><option value="">All types</option><option value="cash">Cash</option><option value="creditor">Creditor</option><option value="salary">Salary</option></select></div>
+        <div class="field"><label>Keyword</label><input class="input" id="fKeyword" placeholder="Name, description…" /></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary btn-sm" id="searchBtn">Search</button>
+        <button class="btn btn-ghost btn-sm" id="clearBtn">Clear</button>
+        <button class="btn btn-ghost btn-sm" id="exportBtn">⬇ Excel</button>
+      </div>
+      <div id="resultsArea"></div>
+    </div>
+  </div>
+</div>
+
+<datalist id="blankDl"></datalist>
+<datalist id="staffDl"></datalist>
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "payment";
+const $ = id => document.getElementById(id), E = escapeHtml;
+let acc, type = "cash", utype = "cash", cats = [], staff = [], creds = [], rows = [], blanks = [], up = [];
+const full = () => acc && acc.level === "full";
+const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const inr = n => "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 });
+const norm = s => String(s == null ? "" : s).trim().toLowerCase();
+const MODES = { cash: "💵 Cash", bank: "🏦 Bank", phonepe: "📱 PhonePe" };
+const catLabel = c => (c.voucher_heads ? c.voucher_heads.name + " / " : "") + c.name;
+
+/* Field spec: [key, label, kind, required]. Same spec drives the entry form, the edit modal and the bulk upload. */
+const T = {
+  cash: { label: "Cash Voucher", icon: "💵", hint: "Daily expenses", tbl: "cash_vouchers", id: "voucher_id", sfx: "cash_voucher",
+    F: [["date","Date","date",1],["category_id","Category","sel:cat",1],["paid_to","Payment to","text",1],["amount","Amount (₹)","num",1],["mode","Mode","mode"],["description","Description","text"],["remark","Remark","text"]],
+    col: { category_id: "category" } },
+  creditor: { label: "Creditor Payment", icon: "🧾", hint: "Supplier / party", tbl: "creditor_payments", id: "payment_id", sfx: "creditor_payment",
+    F: [["date","Date","date",1],["creditor_id","Creditor","sel:cred",1],["amount","Amount (₹)","num",1],["mode","Mode","mode"],["remark","Remark","text"]],
+    col: { creditor_id: "creditor" } },
+  salary: { label: "Salary Payment", icon: "💰", hint: "Staff, by month", tbl: "salary_payments", id: "payment_id", sfx: "salary_payment",
+    F: [["date","Date","date",1],["staff_id","Staff","staff",1],["month","Month","month",1],["amount","Amount (₹)","num",1],["discount","Discount","num"],["mode","Mode","mode"],["remark","Remark","text"]],
+    col: { staff_id: "staff_name" } }
+};
+const colOf = (t, k) => (T[t].col && T[t].col[k]) || k;
+const OPT = ["description", "remark", "discount"];
+
+/* ============================ INIT ============================ */
+async function init() {
+  acc = await getMyAccess(PAGE_ID);
+  if (!acc.profile) return;
+  const [a, b, c] = await Promise.all([
+    supabaseClient.from("voucher_categories").select("*, voucher_heads(name)").order("name"),
+    supabaseClient.from("staff").select("staff_id, staff_name, is_active").eq("is_active", true).order("staff_name"),
+    supabaseClient.from("creditors").select("*").order("name")
+  ]);
+  cats = a.data || []; staff = b.data || []; creds = c.data || [];
+  $("staffDl").innerHTML = staff.map(s => `<option value="${E(s.staff_name)}"></option>`).join("");
+
+  document.querySelectorAll(".tab-btn").forEach(b => b.onclick = () => tab(b.dataset.tab));
+  drawTiles("tilesNew", () => type, t => { type = t; showForm(t, {}); });
+  drawTiles("tilesUp", () => utype, t => { utype = t; $("upArea").style.display = "block"; $("upPreview").innerHTML = ""; $("upFile").value = ""; $("upCols").textContent = "Columns: " + colsOf(t).join(", "); });
+  document.addEventListener("click", e => {
+    const ch = e.target.closest(".chip");
+    if (ch) { ch.parentElement.querySelectorAll(".chip").forEach(x => x.classList.remove("on")); ch.classList.add("on"); }
+  });
+  $("formArea").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.tagName === "INPUT") { e.preventDefault(); save(); } });
+  if (full()) { $("genRangeBtn").style.display = "inline-flex"; $("genRangeBtn").onclick = openRangeModal; }
+  $("saveBtn").onclick = save;
+  $("searchBtn").onclick = doSearch;
+  $("clearBtn").onclick = () => { ["fDateFrom","fDateTo","fNoFrom","fNoTo","fKeyword","fType"].forEach(i => $(i).value = ""); doSearch(); };
+  $("exportBtn").onclick = exportExcel;
+  $("sampleBtn").onclick = downloadSample;
+  const drop = $("drop");
+  drop.onclick = () => $("upFile").click();
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("drag"); };
+  drop.ondragleave = () => drop.classList.remove("drag");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("drag"); if (e.dataTransfer.files[0]) parseFile(e.dataTransfer.files[0]); };
+  $("upFile").onchange = e => e.target.files[0] && parseFile(e.target.files[0]);
+
+  showForm("cash", {});
+  await loadRanges(); await loadBlanks();
+}
+function tab(n) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === n));
+  ["New", "Up", "View"].forEach(x => $("tab" + x).classList.toggle("active", x === n));
+  if (n === "View" && !rows.length) doSearch();
+}
+function drawTiles(id, cur, onPick) {
+  const el = $(id);
+  const paint = () => el.innerHTML = Object.entries(T).map(([k, t]) =>
+    `<button type="button" class="tile${cur() === k && (id === "tilesNew" || $("upArea").style.display === "block") ? " active" : ""}" data-t="${k}"><span class="ti">${t.icon}</span><span><span class="tl">${t.label}</span><span class="ts">${t.hint}</span></span></button>`).join("");
+  el.onclick = e => { const b = e.target.closest(".tile"); if (b) { onPick(b.dataset.t); paint(); } };
+  paint();
+}
+
+/* ==================== VOUCHER RANGE ==================== */
+async function loadRanges() {
+  const { data } = await supabaseClient.from("voucher_ranges").select("*").order("created_at", { ascending: false }).limit(3);
+  $("rangeSummary").innerHTML = data && data.length
+    ? "Recent ranges: " + data.map(r => `<strong>${E(r.prefix || "")}${r.range_start}–${E(r.prefix || "")}${r.range_end}</strong>`).join(", ")
+    : "No voucher ranges generated yet.";
+}
+async function loadBlanks() {
+  const { data } = await supabaseClient.from("general_vouchers").select("voucher_no").eq("status", "blank").order("voucher_seq", { ascending: true }).limit(500);
+  blanks = (data || []).map(v => v.voucher_no);
+  $("blankDl").innerHTML = blanks.map(v => `<option value="${E(v)}"></option>`).join("");
+}
+function openRangeModal() {
+  openModal({
+    title: "Generate voucher range", subtitle: "Creates one blank row per number.",
+    bodyHtml: `<div class="cg"><div class="field"><label>Start</label><input class="input" id="rStart" type="number"/></div>
+      <div class="field"><label>End</label><input class="input" id="rEnd" type="number"/></div>
+      <div class="field"><label>Prefix</label><input class="input" id="rPrefix" placeholder="e.g. CV-"/></div>
+      <div class="field"><label>Note</label><input class="input" id="rNote"/></div></div>
+      <div class="field-error" id="rangeErr">Enter a valid range (max 5000 at a time).</div>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="genBtn">Generate</button>`,
+    onOpen: () => { $("genBtn").onclick = async () => {
+      const s = parseInt($("rStart").value, 10), e = parseInt($("rEnd").value, 10), p = $("rPrefix").value.trim(), n = $("rNote").value.trim();
+      if (!Number.isFinite(s) || !Number.isFinite(e) || e < s || e - s > 5000) { $("rangeErr").classList.add("show"); return; }
+      const { data, error } = await supabaseClient.rpc("generate_voucher_range", { p_start: s, p_end: e, p_prefix: p || null, p_note: n || null });
+      if (error) { showToast("Failed: " + error.message, "error"); return; }
+      await logAudit("voucher_ranges", data.range_id, "insert", null, data);
+      showToast(`Range ${p}${s}–${p}${e} generated.`, "success"); closeModal(); await loadRanges(); await loadBlanks();
+    }; }
+  });
+}
+
+/* ==================== GENERIC FORM ==================== */
+function fld(p, [k, l, t, r], val) {
+  const id = p + k; let h;
+  if (t === "mode") {
+    const cur = norm(val) || "cash";
+    h = `<div class="chips" id="${id}">${Object.entries(MODES).map(([m, x]) => `<button type="button" class="chip${cur === m ? " on" : ""}" data-m="${m}">${x}</button>`).join("")}</div>`;
+  } else if (t === "sel:cat" || t === "sel:cred") {
+    const L = t === "sel:cat" ? cats : creds;
+    h = `<select class="input" id="${id}">${L.map(c => { const v = c.category_id || c.creditor_id; return `<option value="${v}" ${v == val ? "selected" : ""}>${E(t === "sel:cat" ? catLabel(c) : c.name)}</option>`; }).join("")}</select>`;
+  } else if (t === "staff") {
+    h = `<input class="input" id="${id}" list="staffDl" autocomplete="off" placeholder="Type name…" value="${E(val || "")}"/>`;
+  } else {
+    h = `<input class="input" id="${id}" type="${t === "num" ? "number" : t}" ${t === "num" ? 'step="0.01" min="0"' : ""} value="${E(val == null ? "" : val)}"/>`;
+  }
+  return `<div class="field"><label>${l}${r ? " *" : ""}</label>${h}</div>`;
+}
+const formHtml = (t, p, v) => T[t].F.map(f => fld(p, f, v[f[0]])).join("");
+const findStaff = n => staff.find(s => norm(s.staff_name) === norm(n));
+
+function read(t, p) {
+  const v = {}, errs = [];
+  T[t].F.forEach(([k, l, tp, r]) => {
+    const el = $(p + k); let x;
+    if (tp === "mode") x = el.querySelector(".on").dataset.m;
+    else if (tp === "staff") { const s = findStaff(el.value); x = s ? s.staff_id : ""; if (!x) errs.push("Select a valid staff member"); }
+    else x = el.value.trim();
+    if (tp === "num") {
+      x = x === "" ? (r ? NaN : 0) : parseFloat(x);
+      if (isNaN(x) || x < (k === "amount" && t !== "salary" ? 0.01 : 0)) errs.push(`Enter a valid ${l.toLowerCase()}`);
+    } else if (r && !x && tp !== "staff") errs.push(`${l} is required`);
+    v[k] = x;
+  });
+  return { v, errs };
+}
+function params(t, v) {
+  const m = v.mode;
+  if (t === "cash") return { p_voucher_date: v.date, p_category_id: v.category_id, p_paid_to: v.paid_to, p_amount: v.amount, p_payment_mode: m, p_description: v.description || "", p_remark: v.remark || null };
+  if (t === "creditor") return { p_payment_date: v.date, p_creditor_id: v.creditor_id, p_amount: v.amount, p_payment_mode: m, p_remark: v.remark || null };
+  return { p_payment_date: v.date, p_staff_id: v.staff_id, p_salary_month: v.month + "-01", p_amount: v.amount, p_discount: v.discount || 0, p_mode: m, p_remark: v.remark || null };
+}
+async function submit(t, no, v) {
+  const { data, error } = await supabaseClient.rpc("submit_" + T[t].sfx, { p_voucher_no: no, ...params(t, v) });
+  if (error) throw error;
+  await logAudit(T[t].tbl, data[T[t].id], "insert", null, data);
+  await logAudit("general_vouchers", no, "insert", null, data);
+  return data;
+}
+const errMsg = e => /VOUCHER_ALREADY_USED/.test(e.message) ? "Voucher is already entered." : /VOUCHER_NOT_GENERATED/.test(e.message) ? "Voucher number has not been generated." : e.message;
+
+/* ==================== NEW PAYMENT ==================== */
+function showForm(t, keep) {
+  const init = { date: today(), month: today().slice(0, 7), ...keep };
+  $("formArea").innerHTML = `<div class="cg">
+    <div class="field"><label>Voucher No *</label><div class="vrow"><input class="input" id="vNo" list="blankDl" autocomplete="off" placeholder="e.g. 5001"/><button type="button" class="btn btn-ghost btn-sm" id="nextBtn" title="Use next blank voucher">Next</button></div><div class="vstat" id="vStat"></div></div>
+    ${formHtml(t, "e", init)}</div>`;
+  $("vNo").onblur = chkNo;
+  $("nextBtn").onclick = () => { $("vNo").value = blanks[0] || ""; chkNo(); };
+  $("dueArea").innerHTML = "";
+  if (t === "salary") { $("estaff_id").oninput = $("estaff_id").onchange = dueBox; $("emonth").onchange = dueBox; }
+}
+async function chkNo() {
+  const no = $("vNo").value.trim(), s = $("vStat");
+  if (!no) { s.innerHTML = ""; return; }
+  const { data, error } = await supabaseClient.from("general_vouchers").select("*").eq("voucher_no", no).maybeSingle();
+  s.innerHTML = error ? `<span class="vbad">Could not check voucher no.</span>`
+    : !data ? `<span class="vbad">✖ Not generated — generate a range first.</span>`
+    : data.status === "used" ? `<span class="vbad">✖ Already entered — ${E(data.payment_to || "")}, ${inr(data.amount)}, ${E(data.voucher_date || "")}</span>`
+    : `<span class="vok">✔ Available</span>`;
+}
+async function dueBox() {
+  const s = findStaff($("estaff_id").value), m = $("emonth").value, box = $("dueArea");
+  if (!s || !m) { box.innerHTML = ""; return; }
+  const sm = m + "-01";
+  const [{ data: h }, { data: adj }, { data: pays }] = await Promise.all([
+    supabaseClient.from("staff_salary_history").select("*").eq("staff_id", s.staff_id).lte("effective_month", sm).order("effective_month", { ascending: false }).limit(1),
+    supabaseClient.from("salary_month_adjustments").select("*").eq("staff_id", s.staff_id).eq("salary_month", sm).maybeSingle(),
+    supabaseClient.from("salary_payments").select("*").eq("staff_id", s.staff_id).eq("salary_month", sm)
+  ]);
+  const sal = h && h.length ? parseFloat(h[0].salary_amount) : 0, ded = sal / 30 * (adj ? parseFloat(adj.absent_days) : 0), bonus = adj ? parseFloat(adj.bonus_amount) : 0;
+  const coll = (pays || []).reduce((a, p) => a + parseFloat(p.amount) + parseFloat(p.discount), 0), net = sal - ded + bonus;
+  box.innerHTML = `<div class="due-box">Salary ${inr(sal)} − Deduction ${inr(ded)} + Bonus ${inr(bonus)} = <b>${inr(net)}</b> | Collected ${inr(coll)} | <b>Due ${inr(net - coll)}</b></div>`;
+}
+async function save() {
+  const no = $("vNo").value.trim();
+  if (!no) { showToast("Voucher number is required.", "error"); return; }
+  const { v, errs } = read(type, "e");
+  if (errs.length) { showToast(errs[0], "error"); return; }
+  const { data: g } = await supabaseClient.from("general_vouchers").select("status").eq("voucher_no", no).maybeSingle();
+  if (!g) { showToast("Voucher number has not been generated.", "error"); return; }
+  if (g.status === "used") { showToast("Voucher is already entered.", "error"); return; }
+  const btn = $("saveBtn"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    await submit(type, no, v);
+    showToast("Voucher saved.", "success");
+    rows = []; showForm(type, { date: v.date, mode: v.mode, category_id: v.category_id, month: v.month });
+    await loadBlanks(); $("vNo").focus();
+  } catch (e) { showToast("Save failed: " + errMsg(e), "error"); }
+  finally { btn.disabled = false; btn.innerHTML = "💾 Save voucher"; }
+}
+
+/* ==================== BULK UPLOAD ==================== */
+const colsOf = t => ["voucher_no", ...T[t].F.map(f => colOf(t, f[0]))];
+const ALIAS = { payment_date: "date", voucher_date: "date", payment_to: "paid_to", payee: "paid_to", payment_mode: "mode", remarks: "remark", staff: "staff_name", employee_name: "staff_name", creditor_name: "creditor", voucher: "voucher_no", voucher_number: "voucher_no" };
+const nk = k => { k = String(k).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""); return ALIAS[k] || k; };
+const pad = n => String(n).padStart(2, "0");
+function pDate(x) {
+  if (x === "" || x == null) return null;
+  if (typeof x === "number") { const d = XLSX.SSF.parse_date_code(x); return d ? `${d.y}-${pad(d.m)}-${pad(d.d)}` : null; }
+  const s = String(x).trim(); let m, y, mo, d;
+  if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if ((m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/.exec(s))) { d = +m[1]; mo = +m[2]; y = +m[3]; }
+  else return null;
+  const t = new Date(y, mo - 1, d);
+  return t.getFullYear() === y && t.getMonth() === mo - 1 && t.getDate() === d ? `${y}-${pad(mo)}-${pad(d)}` : null;
+}
+function pMonth(x) {
+  if (x === "" || x == null) return null;
+  if (typeof x === "number") { const d = XLSX.SSF.parse_date_code(x); return d ? `${d.y}-${pad(d.m)}` : null; }
+  const s = String(x).trim(); let m;
+  if ((m = /^(\d{4})-(\d{1,2})/.exec(s))) return +m[2] >= 1 && +m[2] <= 12 ? `${m[1]}-${pad(m[2])}` : null;
+  if ((m = /^(\d{1,2})[\/\-](\d{4})$/.exec(s))) return +m[1] >= 1 && +m[1] <= 12 ? `${m[2]}-${pad(m[1])}` : null;
+  if ((m = /^([a-z]{3,9})[\s\-\/,]*(\d{4})$/i.exec(s))) {
+    const i = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"].indexOf(m[1].slice(0, 3).toLowerCase());
+    return i >= 0 ? `${m[2]}-${pad(i + 1)}` : null;
+  }
+  return null;
+}
+function pMode(x) { const v = norm(x).replace(/[^a-z]/g, ""); return v === "upi" ? "phonepe" : ["cash", "bank", "phonepe"].includes(v) ? v : ""; }
+function look(k, text) {
+  const x = norm(text);
+  const L = k === "category_id" ? cats.filter(c => norm(c.name) === x || norm(catLabel(c)) === x).map(c => c.category_id)
+    : k === "creditor_id" ? creds.filter(c => norm(c.name) === x).map(c => c.creditor_id)
+    : staff.filter(s => norm(s.staff_name) === x).map(s => s.staff_id);
+  return L.length === 1 ? L[0] : L.length ? "AMBIG" : "";
+}
+async function parseFile(file) {
+  const box = $("upPreview"); box.innerHTML = '<p class="hint">Reading & validating…</p>';
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const ws = wb.Sheets.Data || wb.Sheets[wb.SheetNames[0]];
+    const R = XLSX.utils.sheet_to_json(ws, { defval: "", raw: true })
+      .map(r => { const o = {}; for (const k in r) o[nk(k)] = r[k]; return o; })
+      .filter(o => Object.values(o).some(x => String(x).trim() !== ""));
+    if (!R.length) { box.innerHTML = '<p class="bad">No data rows found.</p>'; return; }
+    const miss = colsOf(utype).filter(c => !OPT.includes(c) && !(c in R[0]));
+    if (miss.length) { box.innerHTML = `<p class="bad">Missing column(s): ${miss.join(", ")}. Download the sample template to see the format.</p>`; return; }
+
+    const nos = [...new Set(R.map(r => String(r.voucher_no).trim()).filter(Boolean))], map = {};
+    for (let i = 0; i < nos.length; i += 100) {
+      const { data, error } = await supabaseClient.from("general_vouchers").select("voucher_no,status").in("voucher_no", nos.slice(i, i + 100));
+      if (error) throw error;
+      (data || []).forEach(d => map[d.voucher_no] = d);
+    }
+    const seen = {};
+    up = R.map((r, i) => {
+      const errs = [], v = {}, no = String(r.voucher_no).trim();
+      if (!no) errs.push("voucher_no missing");
+      else {
+        if (!map[no]) errs.push("voucher not generated"); else if (map[no].status === "used") errs.push("voucher already used");
+        if (seen[no]) errs.push(`duplicate of row ${seen[no]}`); else seen[no] = i + 2;
+      }
+      T[utype].F.forEach(([k, l, tp, req]) => {
+        const c = colOf(utype, k), x = r[c];
+        if (tp === "date") { v[k] = pDate(x); if (!v[k]) errs.push("date invalid (use YYYY-MM-DD)"); }
+        else if (tp === "month") { v[k] = pMonth(x); if (!v[k]) errs.push("month invalid (use YYYY-MM)"); }
+        else if (tp === "mode") { v[k] = pMode(x); if (!v[k]) errs.push("mode must be Cash / Bank / PhonePe"); }
+        else if (tp === "num") {
+          const n = x === "" ? (req ? NaN : 0) : parseFloat(String(x).replace(/[₹,\s]/g, ""));
+          if (isNaN(n) || n < (k === "amount" && utype !== "salary" ? 0.01 : 0)) errs.push(`${c} invalid`);
+          v[k] = n;
+        } else if (tp === "text") { v[k] = String(x).trim(); if (req && !v[k]) errs.push(`${c} required`); }
+        else { const id = look(k, x); if (id === "AMBIG") errs.push(`${c} "${x}" matches more than one`); else if (!id) errs.push(`${c} "${x}" not found`); v[k] = id; }
+      });
+      return { row: i + 2, no, v, errs, r, done: false };
+    });
+    renderUp();
+  } catch (e) { box.innerHTML = `<p class="bad">Could not read file: ${E(e.message)}</p>`; }
+}
+function renderUp(msg) {
+  const ok = up.filter(x => !x.errs.length && !x.done).length, bad = up.filter(x => x.errs.length).length, done = up.filter(x => x.done).length;
+  const pc = utype === "cash" ? "paid_to" : utype === "creditor" ? "creditor" : "staff_name";
+  $("upPreview").innerHTML = `
+    <div class="sum"><span>${up.length} rows</span><span class="ok">${ok} ready</span><span class="${bad ? "bad" : ""}">${bad} with errors</span>${done ? `<span class="ok">${done} imported</span>` : ""}</div>
+    <div class="actions" style="margin:0 0 8px"><button class="btn btn-primary btn-sm" id="importBtn" ${ok ? "" : "disabled"}>📥 Import ${ok} valid row(s)</button><span class="hint" id="upProg" style="margin:0">${msg || ""}</span></div>
+    <div class="table-wrap"><table class="data"><thead><tr><th>Row</th><th>Voucher</th><th>Date</th><th>${utype === "salary" ? "Staff / Month" : utype === "cash" ? "Paid to" : "Creditor"}</th><th>Amount</th><th>Mode</th><th>Status</th></tr></thead><tbody>
+    ${up.map(x => `<tr class="${x.errs.length ? "rbad" : ""}"><td>${x.row}</td><td>${E(x.no)}</td><td>${E(x.v.date || x.r.date)}</td>
+      <td>${E(x.r[pc])}${utype === "salary" ? " · " + E(x.v.month || x.r.month) : ""}</td><td>${x.r.amount === "" ? "-" : inr(x.v.amount)}</td><td>${E(x.v.mode || x.r.mode)}</td>
+      <td class="${x.errs.length ? "bad" : "ok"}">${x.done ? "✔ Imported" : x.errs.length ? "✖ " + E(x.errs.join("; ")) : "✔ OK"}</td></tr>`).join("")}
+    </tbody></table></div>`;
+  $("importBtn").onclick = doImport;
+}
+async function doImport() {
+  const todo = up.filter(x => !x.errs.length && !x.done);
+  if (!todo.length || !confirm(`Import ${todo.length} ${T[utype].label} row(s)?`)) return;
+  $("importBtn").disabled = true;
+  let n = 0;
+  for (const x of todo) {
+    $("upProg").textContent = `Importing ${++n} / ${todo.length}…`;
+    try { await submit(utype, x.no, x.v); x.done = true; } catch (e) { x.errs = [errMsg(e)]; }
+  }
+  rows = []; await loadBlanks();
+  const f = todo.filter(x => !x.done).length;
+  renderUp(`Finished: ${todo.length - f} imported${f ? `, ${f} failed (see errors)` : ""}.`);
+  showToast(`${todo.length - f} voucher(s) imported.`, f ? "error" : "success");
+}
+function downloadSample() {
+  const t = utype, cols = colsOf(t), b = blanks.length >= 3 ? blanks : ["5001", "5002", "5003"], d = today(), mo = d.slice(0, 7), M = ["Cash", "Bank", "PhonePe"];
+  const pick = (L, f, i, alt) => L.length ? f(L[i % L.length]) : alt;
+  const eg = [0, 1, 2].map(i => {
+    const o = { voucher_no: b[i], date: d, mode: M[i], amount: [1500, 25000, 12000][i], remark: i === 0 ? "example row" : "" };
+    if (t === "cash") Object.assign(o, { category: pick(cats, catLabel, i, "Office / Stationery"), paid_to: ["Local Vendor", "Courier Charges", "Tea & Snacks"][i], description: ["Office supplies", "Parcel to Kolkata", "Staff meeting"][i] });
+    if (t === "creditor") o.creditor = pick(creds, c => c.name, i, "ABC Traders");
+    if (t === "salary") Object.assign(o, { staff_name: pick(staff, s => s.staff_name, i, "Ramesh Das"), month: mo, discount: 0 });
+    return cols.map(c => o[c] === undefined ? "" : o[c]);
+  });
+  const help = { voucher_no: "A blank voucher number from your generated range", date: "YYYY-MM-DD (or DD/MM/YYYY)", category: "Category name, or 'Head / Category'", paid_to: "Who is being paid", creditor: "Creditor name exactly as in the system", staff_name: "Active staff name exactly as in the system", month: "Salary month, YYYY-MM", amount: "Number, no symbols", discount: "Optional, number (default 0)", mode: "Cash, Bank or PhonePe", description: "Optional", remark: "Optional" };
+  const wb = XLSX.utils.book_new(), ws = XLSX.utils.aoa_to_sheet([cols, ...eg]);
+  ws["!cols"] = cols.map(c => ({ wch: Math.max(c.length + 4, 16) }));
+  XLSX.utils.book_append_sheet(wb, ws, "Data");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Column", "Required", "Format"], ...cols.map(c => [c, OPT.includes(c) ? "No" : "Yes", help[c] || ""]), [], ["Note", "", "The Data sheet holds example rows — replace them with your own, keep the header row, one payment per row."]]), "Instructions");
+  XLSX.writeFile(wb, `${t}_payments_sample.xlsx`);
+}
+
+/* ==================== REGISTER ==================== */
+async function doSearch() {
+  const area = $("resultsArea"); area.innerHTML = '<div class="skeleton" style="height:18px"></div>';
+  let q = supabaseClient.from("general_vouchers").select("*").eq("status", "used");
+  const g = i => $(i).value, kw = g("fKeyword").trim().replace(/[,()%*]/g, " ");
+  if (g("fDateFrom")) q = q.gte("voucher_date", g("fDateFrom"));
+  if (g("fDateTo")) q = q.lte("voucher_date", g("fDateTo"));
+  if (g("fNoFrom")) q = q.gte("voucher_seq", parseInt(g("fNoFrom"), 10));
+  if (g("fNoTo")) q = q.lte("voucher_seq", parseInt(g("fNoTo"), 10));
+  if (g("fType")) q = q.eq("voucher_type", g("fType"));
+  if (kw) q = q.or(`payment_to.ilike.%${kw}%,description.ilike.%${kw}%,category.ilike.%${kw}%,voucher_no.ilike.%${kw}%`);
+  const { data, error } = await q.order("voucher_seq", { ascending: false }).limit(1000);
+  if (error) { area.innerHTML = `<div class="empty-state"><p>Search failed: ${E(error.message)}</p></div>`; return; }
+  rows = data || []; renderResults();
+}
+function renderResults() {
+  const area = $("resultsArea");
+  if (!rows.length) { area.innerHTML = '<div class="empty-state"><div class="icon">🧾</div><p>No vouchers found.</p></div>'; return; }
+  const tot = k => rows.filter(r => !k || r.voucher_type === k).reduce((a, r) => a + Number(r.amount || 0), 0), ed = full();
+  area.innerHTML = `
+    <div class="sum"><span>${rows.length} vouchers · <b>${inr(tot())}</b></span>${Object.entries(T).map(([k, t]) => `<span>${t.icon} ${inr(tot(k))}</span>`).join("")}${rows.length === 1000 ? "<span>showing first 1000</span>" : ""}</div>
+    <div class="table-wrap"><table class="data"><thead><tr><th>Voucher</th><th>Date</th><th>Type</th><th>Category</th><th>Payment To</th><th>Amount</th><th>Mode</th><th>Description</th><th>By</th>${ed ? "<th></th>" : ""}</tr></thead><tbody>
+    ${rows.map(v => `<tr><td>${E(v.voucher_no)}</td><td>${E(v.voucher_date || "")}</td><td><span class="badge badge-neutral">${(T[v.voucher_type] || {}).label || "-"}</span></td>
+      <td>${E(v.category || "")}</td><td>${E(v.payment_to || "")}</td><td>${inr(v.amount)}</td><td>${E(v.payment_mode || "")}</td><td>${E(v.description || "")}</td><td>${E(v.entered_by || "")}</td>
+      ${ed ? `<td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-edit="${E(v.voucher_no)}">Edit</button> <button class="btn btn-danger btn-sm" data-del="${E(v.voucher_no)}">Delete</button></td>` : ""}</tr>`).join("")}
+    </tbody></table></div>`;
+  area.onclick = e => { const b = e.target.closest("button"); if (!b) return; if (b.dataset.edit) editV(b.dataset.edit); if (b.dataset.del) delV(b.dataset.del); };
+}
+
+/* ==================== EDIT / DELETE (full access) ==================== */
+async function editV(no) {
+  if (!full()) return;
+  const { data: g, error } = await supabaseClient.from("general_vouchers").select("*").eq("voucher_no", no).single();
+  if (error || !g) { showToast("Could not load voucher.", "error"); return; }
+  const t = g.voucher_type, c = T[t];
+  const { data: r, error: e2 } = await supabaseClient.from(c.tbl).select(t === "salary" ? "*, staff(staff_name)" : "*").eq(c.id, g.source_id).single();
+  if (e2 || !r) { showToast("Could not load voucher.", "error"); return; }
+  if (t === "salary" && r.staff && !staff.some(s => s.staff_id === r.staff_id)) staff.push({ staff_id: r.staff_id, staff_name: r.staff.staff_name });
+  const v = t === "cash" ? { date: r.voucher_date, category_id: r.category_id, paid_to: r.paid_to, amount: r.amount, mode: r.payment_mode, description: r.description, remark: r.remark }
+    : t === "creditor" ? { date: r.payment_date, creditor_id: r.creditor_id, amount: r.amount, mode: r.payment_mode, remark: r.remark }
+    : { date: r.payment_date, staff_id: r.staff && r.staff.staff_name, month: String(r.salary_month).slice(0, 7), amount: r.amount, discount: r.discount, mode: r.mode, remark: r.remark };
+  openModal({
+    title: `Edit ${c.label} ${no}`, wide: true,
+    bodyHtml: `<div class="cg">${formHtml(t, "m", v)}</div><p class="hint">To change the voucher number, delete this entry and re-enter it.</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="mSave">Save changes</button>`,
+    onOpen: () => { $("mSave").onclick = async () => {
+      const { v: nv, errs } = read(t, "m");
+      if (errs.length) { showToast(errs[0], "error"); return; }
+      const btn = $("mSave"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+      const { data, error } = await supabaseClient.rpc("update_" + c.sfx, { ["p_" + c.id]: r[c.id], ...params(t, nv) });
+      if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.innerHTML = "Save changes"; return; }
+      await logAudit(c.tbl, r[c.id], "update", r, data); await logAudit("general_vouchers", no, "update", g, data);
+      showToast("Voucher updated.", "success"); closeModal(); await doSearch();
+    }; }
+  });
+}
+function delV(no) {
+  if (!full()) return;
+  openModal({
+    title: "Delete voucher?", subtitle: "Removes the entry from the register and its source table. The number becomes blank and reusable.",
+    bodyHtml: `<p>Delete voucher "<strong>${E(no)}</strong>"?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-danger" id="delOk">Delete</button>`,
+    onOpen: () => { $("delOk").onclick = async () => {
+      const { error } = await supabaseClient.rpc("delete_voucher_by_no", { p_voucher_no: no });
+      if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+      await logAudit("general_vouchers", no, "delete", { voucher_no: no }, null);
+      closeModal(); showToast("Voucher deleted.", "success"); await doSearch(); await loadBlanks();
+    }; }
+  });
+}
+
+/* ==================== EXPORT ==================== */
+function exportExcel() {
+  if (!rows.length) { showToast("No results to export.", "error"); return; }
+  const ws = XLSX.utils.json_to_sheet(rows.map(v => ({ "Voucher No": v.voucher_no, Date: v.voucher_date || "", Type: v.voucher_type || "", Category: v.category || "", "Payment To": v.payment_to || "", Amount: Number(v.amount || 0), Mode: v.payment_mode || "", Description: v.description || "", "Entry Time": v.entry_time ? formatDateTime(v.entry_time) : "" })));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Vouchers");
+  XLSX.writeFile(wb, `vouchers_${today()}.xlsx`);
+}
+
+init();
+</script>
+</body>
+</html>

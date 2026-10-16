@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Golden Heritage Academy — Portal</title>
+
+<!-- PWA / Meta -->
+<meta name="description" content="Student &amp; Staff Management Portal for Golden Heritage Academy" />
+<meta name="theme-color" content="#0284C7" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="GHA Portal" />
+<meta name="mobile-web-app-capable" content="yes" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="assets/icons/icon-192.svg" />
+
+<link rel="stylesheet" href="assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/common.js"></script>
+<style>
+  /* ============================================================
+     FRAME SHELL — styles specific to the main app shell only.
+     Not shared with module pages inside the iframe.
+     ============================================================ */
+  body {
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  /* ===== AUTH SCREEN ===== */
+  #authScreen {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    background:
+      radial-gradient(ellipse 1200px 600px at 10% -15%, rgba(34,197,94,0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 900px 700px at 100% 110%, rgba(2,132,199,0.14) 0%, transparent 70%),
+      linear-gradient(160deg, #F0F9FF 0%, #E0F2FE 100%);
+  }
+  .auth-card { width: 100%; max-width: 420px; animation: enterUp .5s var(--ease) both; }
+
+  /* Brand / crest */
+  .auth-brand { text-align: center; margin-bottom: 28px; }
+  .auth-brand .crest {
+    width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 16px;
+    background: linear-gradient(145deg, var(--ink-3), var(--ink-2));
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-family: var(--font-display);
+    font-size: 26px; font-weight: 700; letter-spacing: .02em;
+    box-shadow: var(--shadow-md), 0 0 0 6px rgba(34,197,94,0.20);
+    border: 2px solid rgba(34,197,94,0.40);
+  }
+  .auth-brand h1 {
+    font-family: var(--font-display);
+    font-size: 22px; font-weight: 700; margin-bottom: 5px;
+    color: var(--ink); letter-spacing: -.015em;
+  }
+  .auth-brand .tagline {
+    font-size: 13px; color: var(--ink-soft);
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .auth-brand .tagline::before,
+  .auth-brand .tagline::after {
+    content: ''; display: inline-block; width: 24px; height: 1px; background: var(--line-strong);
+  }
+
+  .auth-card .card { padding: 30px 28px; border-radius: var(--radius-lg); }
+
+  /* Tabs */
+  .auth-tabs {
+    display: flex; background: var(--paper); border-radius: 999px;
+    padding: 4px; margin-bottom: 24px; border: 1px solid var(--line);
+  }
+  .auth-tabs button {
+    flex: 1; border: none; background: transparent; padding: 9px 0;
+    border-radius: 999px; font-weight: 600; font-size: 13px;
+    color: var(--ink-soft); cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  }
+  .auth-tabs button.active {
+    background: var(--ink); color: #fff;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .auth-form { display: none; }
+  .auth-form.active { display: block; animation: enterUp .32s var(--ease) both; }
+
+  .auth-msg {
+    font-size: 13px; padding: 11px 14px; border-radius: var(--radius-sm);
+    margin-bottom: 18px; display: none; border-width: 1px; border-style: solid;
+    line-height: 1.45;
+  }
+  .auth-msg.show { display: flex; align-items: flex-start; gap: 8px; }
+  .auth-msg.err    { background: var(--danger-bg);  color: var(--danger);  border-color: rgba(192,57,43,0.2); }
+  .auth-msg.ok     { background: var(--success-bg); color: var(--success); border-color: rgba(30,126,90,0.2); }
+  .auth-msg.info   { background: var(--warning-bg); color: var(--warning); border-color: rgba(183,113,15,0.2); }
+
+  .auth-foot-note {
+    text-align: center; font-size: 12px; color: var(--ink-faint); margin-top: 18px;
+    line-height: 1.5; padding: 0 8px;
+  }
+
+  /* ===== APP SHELL ===== */
+  #appShell {
+    display: none;
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: 100vh;
+    height: 100dvh;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ----- TOP BAR ----- */
+  #topbar {
+    height: 62px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+    padding: 0 16px; z-index: 320; position: sticky; top: 0;
+    background: linear-gradient(90deg, #0284C7 0%, #0EA5E9 100%);
+    border-bottom: 1px solid rgba(186, 230, 253, 0.4);
+    box-shadow: 0 2px 16px rgba(2, 132, 199, 0.25);
+  }
+  #hamburgerBtn {
+    background: none; border: none; color: rgba(255,255,255,0.9);
+    font-size: 20px; cursor: pointer; padding: 8px; border-radius: var(--radius-sm);
+    line-height: 1; transition: background var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease;
+    flex-shrink: 0;
+  }
+  #hamburgerBtn:hover { background: rgba(255,255,255,0.18); color: #fff; }
+
+  #topbar .brand {
+    font-family: var(--font-display); font-weight: 600; font-size: 17px;
+    flex: 1; letter-spacing: .005em; color: #fff; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #topbar .brand .brand-accent { color: #86EFAC; }
+  #topbar .brand .brand-sub {
+    font-size: 11px; color: rgba(255,255,255,0.75); font-family: var(--font-body);
+    font-weight: 400; letter-spacing: .05em; text-transform: uppercase;
+    margin-left: 8px; display: none;
+  }
+  @media (min-width: 520px) { #topbar .brand .brand-sub { display: inline; } }
+
+  /* User chip */
+  .user-chip {
+    display: flex; align-items: center; gap: 9px;
+    background: rgba(255,255,255,0.15); padding: 6px 10px 6px 6px;
+    border-radius: 999px; cursor: pointer; border: 1px solid rgba(255,255,255,0.25);
+    color: #fff; font-family: var(--font-body);
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+  }
+  .user-chip:hover { background: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.4); }
+  .user-chip .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--brass-light), var(--brass));
+    color: #0C4A6E; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 13px; letter-spacing: .01em; flex-shrink: 0;
+  }
+  .user-chip .user-info { text-align: left; line-height: 1.2; }
+  .user-chip .username-text { display: block; font-size: 13px; font-weight: 600; }
+  .user-chip .role-tag { display: block; font-size: 10.5px; opacity: .8; text-transform: capitalize; }
+  .user-chip .chevron { font-size: 9px; opacity: .7; margin-left: 2px; }
+
+  /* Dropdown */
+  .dropdown { position: relative; flex-shrink: 0; }
+  .dropdown-panel {
+    position: absolute; right: 0; top: 52px; background: var(--paper-2); color: var(--ink);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-lg); border: 1px solid var(--line);
+    width: 220px; padding: 8px; opacity: 0; transform: translateY(-8px); pointer-events: none;
+    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); z-index: 350;
+  }
+  .dropdown-panel.open { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .dropdown-panel .dp-header {
+    padding: 10px 12px 8px; border-bottom: 1px solid var(--line); margin-bottom: 6px;
+    font-size: 12px; color: var(--ink-faint);
+  }
+  .dropdown-panel button {
+    width: 100%; text-align: left; background: none; border: none; padding: 10px 13px;
+    border-radius: var(--radius-sm); font-size: 13.5px; cursor: pointer; color: var(--ink);
+    display: flex; align-items: center; gap: 10px; font-family: var(--font-body);
+    transition: background var(--dur-fast) ease;
+  }
+  .dropdown-panel button:hover { background: var(--paper); }
+  .dropdown-panel button.danger { color: var(--danger); }
+  .dropdown-panel button.danger:hover { background: var(--danger-bg); }
+
+  /* ----- SIDE NAV (supports Full Expanded, Retracted Icon-Rail, and Hover-Expand) ----- */
+  :root {
+    --nav-expanded-w: 274px;
+    --nav-rail-w: 68px;
+  }
+
+  #navScrim {
+    position: fixed; inset: 0; background: rgba(12,74,110,0.52);
+    opacity: 0; pointer-events: none;
+    transition: opacity var(--dur) var(--ease); z-index: 299;
+    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+  }
+  #navScrim.open { opacity: 1; pointer-events: auto; }
+
+  #sideNav {
+    position: fixed; top: 62px; left: 0; bottom: 0;
+    width: var(--nav-expanded-w); max-width: 86vw;
+    background: #0369A1; z-index: 300;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(-100%);
+    transition: width 240ms var(--ease), transform 240ms var(--ease), box-shadow 240ms var(--ease);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #sideNav.open { transform: translateX(0); }
+
+  /* Nav header */
+  #sideNav .nav-head {
+    padding: 16px 14px;
+    background: rgba(255,255,255,0.08);
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    display: flex; align-items: center; gap: 13px; flex-shrink: 0;
+    min-height: 68px; overflow: hidden;
+  }
+  #sideNav .nav-head .crest-sm {
+    width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+    background: linear-gradient(145deg, #38BDF8, #0284C7);
+    border: 2px solid rgba(34,197,94,0.6);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 700; font-size: 15px;
+    transition: margin 220ms var(--ease);
+  }
+  #sideNav .nav-head .nav-brand {
+    min-width: 0; white-space: nowrap; overflow: hidden;
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+  #sideNav .nav-head .nav-brand-name {
+    font-family: var(--font-display); font-weight: 700; font-size: 14px;
+    color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #sideNav .nav-head .nav-brand-sub {
+    font-size: 10.5px; color: rgba(255,255,255,0.7);
+    text-transform: uppercase; letter-spacing: .07em; margin-top: 2px;
+  }
+
+  #sideNav .nav-scroll {
+    flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 8px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
+  #sideNav .nav-scroll::-webkit-scrollbar { width: 4px; }
+  #sideNav .nav-scroll::-webkit-scrollbar-track { background: transparent; }
+  #sideNav .nav-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+  /* Nav footer */
+  #sideNav .nav-foot {
+    padding: 12px 14px; border-top: 1px solid rgba(255,255,255,0.12);
+    flex-shrink: 0; font-size: 11px; color: rgba(255,255,255,0.55);
+    text-align: center; letter-spacing: .03em; white-space: nowrap;
+    overflow: hidden; transition: opacity 180ms ease;
+  }
+
+  /* Group labels */
+  .nav-group-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em;
+    color: rgba(255,255,255,0.65); font-weight: 700;
+    padding: 14px 12px 5px; margin-top: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: opacity 180ms ease, height 180ms ease, padding 180ms ease;
+  }
+  .nav-group-label:first-child { padding-top: 4px; margin-top: 0; }
+  .nav-group-divider {
+    height: 1px; background: rgba(255,255,255,0.14);
+    margin: 8px 10px; display: none;
+  }
+
+  /* Nav items */
+  .nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 13px; border-radius: var(--radius-sm);
+    cursor: pointer; font-size: 13.5px; color: rgba(255,255,255,0.88);
+    font-weight: 500; margin-bottom: 3px;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease, padding var(--dur-fast) ease;
+    position: relative; white-space: nowrap; overflow: hidden;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.14); color: #fff; }
+  .nav-item.active {
+    background: linear-gradient(90deg, rgba(34,197,94,0.32) 0%, rgba(34,197,94,0.12) 100%);
+    color: #fff;
+    border-left: 3px solid var(--brass);
+    padding-left: 10px;
+    font-weight: 600;
+  }
+  .nav-item .ic {
+    width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+    text-align: center; font-size: 17px; flex-shrink: 0;
+  }
+  .nav-item .nav-label {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+  .nav-item .perm-dot {
+    margin-left: auto; width: 7px; height: 7px; border-radius: 50%;
+    flex-shrink: 0; transition: opacity 160ms ease;
+  }
+  .nav-item .perm-dot.view-only { background: #BAE6FD; }
+  .nav-item .perm-dot.limited   { background: var(--brass-light); }
+
+  /* ----- CONTENT AREA ----- */
+  #contentArea {
+    flex: 1; position: relative; background: var(--paper); min-height: 0;
+    -webkit-overflow-scrolling: touch;
+    overflow-y: auto;
+    touch-action: pan-y;
+    transition: margin-left 240ms var(--ease);
+  }
+  #contentFrame {
+    width: 100%; height: 100%; min-height: 100%; border: none;
+    position: absolute; inset: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  #frameLoading {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; background: var(--paper); flex-direction: column; gap: 14px;
+    z-index: 10;
+  }
+  #frameLoading .loading-text { font-size: 13px; color: var(--ink-faint); }
+
+  /* ----- DESKTOP SIDEBAR: PINNED EXPANDED vs RETRACTED ICON-RAIL WITH HOVER EXPAND ----- */
+  @media (min-width: 900px) {
+    #sideNav {
+      transform: translateX(0);
+      top: 62px;
+      height: calc(100vh - 62px);
+      height: calc(100dvh - 62px);
+    }
+    #navScrim { display: none !important; }
+
+    /* State 1: Pinned Full Sidebar */
+    #appShell.nav-pinned #sideNav {
+      width: var(--nav-expanded-w);
+    }
+    #appShell.nav-pinned #contentArea {
+      margin-left: var(--nav-expanded-w);
+    }
+
+    /* State 2: Retracted Narrow Icon-Rail Sidebar (expands smoothly on hover) */
+    #appShell.nav-retracted #sideNav {
+      width: var(--nav-rail-w);
+    }
+    #appShell.nav-retracted #contentArea {
+      margin-left: var(--nav-rail-w);
+    }
+
+    /* When retracted AND NOT hovered: show only centered icons */
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-brand,
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-label,
+    #appShell.nav-retracted #sideNav:not(:hover) .perm-dot,
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-foot {
+      opacity: 0;
+      pointer-events: none;
+      width: 0;
+    }
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-group-label {
+      opacity: 0;
+      height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      margin: 0;
+    }
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-group-divider {
+      display: block;
+    }
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-head {
+      justify-content: center;
+      padding-left: 0;
+      padding-right: 0;
+    }
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-item {
+      justify-content: center;
+      padding-left: 0;
+      padding-right: 0;
+      gap: 0;
+    }
+    #appShell.nav-retracted #sideNav:not(:hover) .nav-item.active {
+      padding-left: 0;
+      border-left-width: 3px;
+    }
+
+    /* When retracted AND hovered: smoothly expand to full menu over content */
+    #appShell.nav-retracted #sideNav:hover {
+      width: var(--nav-expanded-w);
+      box-shadow: 12px 0 36px rgba(12, 74, 110, 0.32);
+    }
+  }
+
+  /* ----- MOBILE (< 900px): ALSO ALLOW RETRACTED ICON RAIL OR OVERLAY ----- */
+  @media (max-width: 899px) {
+    #sideNav {
+      top: 0;
+      height: 100vh;
+      height: 100dvh;
+    }
+  }
+
+  /* ----- PWA INSTALL BANNER ----- */
+  #pwaInstallBanner {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 500;
+    background: linear-gradient(90deg, #0284C7 0%, #0EA5E9 100%);
+    color: #fff; padding: 14px 18px; display: none;
+    align-items: center; gap: 14px;
+    border-top: 1px solid rgba(186,230,253,0.4);
+    box-shadow: 0 -4px 20px rgba(2,132,199,0.25);
+    animation: slideUp .35s var(--ease) both;
+  }
+  #pwaInstallBanner.show { display: flex; }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  #pwaInstallBanner .pwa-icon { font-size: 26px; flex-shrink: 0; }
+  #pwaInstallBanner .pwa-text { flex: 1; min-width: 0; }
+  #pwaInstallBanner .pwa-text strong { display: block; font-size: 13.5px; font-weight: 600; }
+  #pwaInstallBanner .pwa-text span { font-size: 12px; opacity: .85; }
+  #pwaInstallBanner .pwa-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  #pwaInstallBanner .btn-pwa-install {
+    background: #22C55E; color: #fff; border: none;
+    padding: 8px 16px; border-radius: var(--radius-sm); font-size: 13px;
+    font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  #pwaInstallBanner .btn-pwa-dismiss {
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.15); padding: 8px 12px;
+    border-radius: var(--radius-sm); font-size: 13px; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================ AUTH SCREEN ================================ -->
+<div id="authScreen">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="crest">GH</div>
+      <h1 id="brandTitle">Golden Heritage Academy</h1>
+      <div class="tagline">Student &amp; Staff Portal</div>
+    </div>
+
+    <div class="card">
+      <div class="auth-tabs">
+        <button id="tabLoginBtn" class="active" onclick="switchAuthTab('login')">Sign in</button>
+        <button id="tabRegisterBtn" onclick="switchAuthTab('register')">Register</button>
+      </div>
+
+      <div id="authMsg" class="auth-msg"></div>
+
+      <!-- LOGIN -->
+      <form id="loginForm" class="auth-form active" onsubmit="return handleLogin(event)">
+        <div class="field">
+          <label for="loginUsername">Username</label>
+          <input class="input" id="loginUsername" autocomplete="username" placeholder="Enter your username" required />
+        </div>
+        <div class="field">
+          <label for="loginPassword">Password</label>
+          <div class="pw-wrap">
+            <input class="input" type="password" id="loginPassword" autocomplete="current-password" placeholder="••••••••" required />
+            <button type="button" class="pw-toggle" onclick="togglePw('loginPassword', this)">SHOW</button>
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%;margin-top:4px" id="loginSubmitBtn">
+          <span class="btn-label">Sign in</span>
+        </button>
+      </form>
+
+      <!-- REGISTER -->
+      <form id="registerForm" class="auth-form" onsubmit="return handleRegister(event)">
+        <div class="field">
+          <label for="regUsername">Username</label>
+          <input class="input" id="regUsername" placeholder="e.g. john_doe" required minlength="3" pattern="[a-zA-Z0-9_\.]+" title="Letters, numbers, dot and underscore only" />
+        </div>
+        <div class="field">
+          <label for="regMobile">Mobile number</label>
+          <input class="input" id="regMobile" type="tel" placeholder="+1 000 000 0000" required minlength="7" />
+        </div>
+        <div class="field">
+          <label for="regPassword">Password</label>
+          <div class="pw-wrap">
+            <input class="input" type="password" id="regPassword" placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password" />
+            <button type="button" class="pw-toggle" onclick="togglePw('regPassword', this)">SHOW</button>
+          </div>
+          <div class="hint">At least 8 characters — mix letters, numbers &amp; symbols.</div>
+        </div>
+        <div class="field">
+          <label for="regPassword2">Confirm password</label>
+          <input class="input" type="password" id="regPassword2" placeholder="Re-enter password" required minlength="8" autocomplete="new-password" />
+        </div>
+        <button class="btn btn-accent" type="submit" style="width:100%;margin-top:4px" id="regSubmitBtn">
+          <span class="btn-label">Create account</span>
+        </button>
+      </form>
+
+      <div class="auth-foot-note">New accounts are reviewed by an administrator before you can sign&nbsp;in.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================ APP SHELL ================================ -->
+<div id="appShell" class="nav-pinned">
+  <div id="topbar">
+    <button id="hamburgerBtn" onclick="toggleNav()" aria-label="Toggle menu" title="Toggle sidebar (Expanded / Icon Rail)">☰</button>
+    <div class="brand">
+      Golden Heritage <span class="brand-accent">Academy</span>
+      <span class="brand-sub">Portal</span>
+    </div>
+    <div class="dropdown">
+      <button class="user-chip" onclick="toggleUserMenu()" aria-label="User menu" aria-haspopup="true">
+        <span class="avatar" id="avatarInitial">?</span>
+        <span class="user-info">
+          <span class="username-text" id="chipUsername">—</span>
+          <span class="role-tag" id="chipRole">—</span>
+        </span>
+        <span class="chevron">▾</span>
+      </button>
+      <div class="dropdown-panel" id="userMenuPanel" role="menu">
+        <div class="dp-header" id="dropdownHeader">Signed in</div>
+        <button onclick="openChangePasswordModal()" role="menuitem">🔑 Change password</button>
+        <button class="danger" onclick="handleLogout()" role="menuitem">🚪 Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="navScrim" onclick="closeNav()"></div>
+  <nav id="sideNav" aria-label="Main navigation">
+    <div class="nav-head">
+      <div class="crest-sm" title="Golden Heritage Academy">GH</div>
+      <div class="nav-brand">
+        <div class="nav-brand-name">Golden Heritage</div>
+        <div class="nav-brand-sub">Academy Portal</div>
+      </div>
+    </div>
+    <div class="nav-scroll" id="navScroll"><!-- populated dynamically from Supabase --></div>
+    <div class="nav-foot">© Golden Heritage Academy</div>
+  </nav>
+
+  <div id="contentArea">
+    <div id="frameLoading">
+      <div class="spinner spinner-green" style="width:28px;height:28px;border-width:3px"></div>
+      <div class="loading-text">Loading…</div>
+    </div>
+    <iframe id="contentFrame" title="Page content" scrolling="yes"></iframe>
+  </div>
+</div>
+
+<!-- PWA Install Banner -->
+<div id="pwaInstallBanner">
+  <div class="pwa-icon">📱</div>
+  <div class="pwa-text">
+    <strong>Install GHA Portal</strong>
+    <span>Add to your home screen for quick access</span>
+  </div>
+  <div class="pwa-actions">
+    <button class="btn-pwa-install" id="pwaInstallBtn">Install</button>
+    <button class="btn-pwa-dismiss" id="pwaDismissBtn">✕</button>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+/* ============================================================================
+   MAIN FRAME APP LOGIC (Supabase Dynamic Menu + Retractable Icon-Rail Sidebar)
+   ============================================================================ */
+let currentProfile = null;
+let activeMenuId = null;
+let currentMenuItems = [];
+
+/* ---------- Auth tab switching ---------- */
+function switchAuthTab(tab) {
+  document.getElementById("tabLoginBtn").classList.toggle("active", tab === "login");
+  document.getElementById("tabRegisterBtn").classList.toggle("active", tab === "register");
+  document.getElementById("loginForm").classList.toggle("active", tab === "login");
+  document.getElementById("registerForm").classList.toggle("active", tab === "register");
+  hideAuthMsg();
+}
+function togglePw(id, btn) {
+  const el = document.getElementById(id);
+  const isPw = el.type === "password";
+  el.type = isPw ? "text" : "password";
+  btn.textContent = isPw ? "HIDE" : "SHOW";
+}
+function showAuthMsg(text, kind, icon = "") {
+  const el = document.getElementById("authMsg");
+  const icons = { err: "⚠️", ok: "✅", info: "ℹ️" };
+  const ic = icon || icons[kind] || "";
+  el.innerHTML = ic ? `<span style="flex-shrink:0">${ic}</span><span>${text}</span>` : `<span>${text}</span>`;
+  el.className = `auth-msg show ${kind}`;
+}
+function hideAuthMsg() {
+  document.getElementById("authMsg").className = "auth-msg";
+}
+function setBtnLoading(btn, loading, labelWhenIdle) {
+  btn.disabled = loading;
+  btn.innerHTML = loading
+    ? '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Please wait…'
+    : `<span class="btn-label">${labelWhenIdle}</span>`;
+}
+
+/* ---------- LOGIN ---------- */
+async function handleLogin(e) {
+  e.preventDefault();
+  hideAuthMsg();
+  const btn = document.getElementById("loginSubmitBtn");
+  const username = document.getElementById("loginUsername").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  setBtnLoading(btn, true, "Sign in");
+
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: usernameToEmail(username), password
+  });
+
+  if (error) {
+    setBtnLoading(btn, false, "Sign in");
+    showAuthMsg("Incorrect username or password.", "err");
+    return false;
+  }
+
+  const profile = await getCurrentProfile();
+  if (!profile) {
+    setBtnLoading(btn, false, "Sign in");
+    showAuthMsg("Account profile not found. Contact an administrator.", "err");
+    await supabaseClient.auth.signOut();
+    return false;
+  }
+  if (profile.status === STATUS.PENDING) {
+    setBtnLoading(btn, false, "Sign in");
+    showAuthMsg("Your account is awaiting admin approval.", "info");
+    await supabaseClient.auth.signOut();
+    return false;
+  }
+  if (profile.status === STATUS.DEACTIVATED) {
+    setBtnLoading(btn, false, "Sign in");
+    showAuthMsg("This account has been deactivated. Contact an administrator.", "err");
+    await supabaseClient.auth.signOut();
+    return false;
+  }
+
+  currentProfile = profile;
+  await enterApp();
+  return false;
+}
+
+/* ---------- REGISTER ---------- */
+async function handleRegister(e) {
+  e.preventDefault();
+  hideAuthMsg();
+  const btn = document.getElementById("regSubmitBtn");
+  const username = document.getElementById("regUsername").value.trim();
+  const mobile = document.getElementById("regMobile").value.trim();
+  const pw = document.getElementById("regPassword").value;
+  const pw2 = document.getElementById("regPassword2").value;
+
+  if (pw !== pw2) { showAuthMsg("Passwords do not match.", "err"); return false; }
+
+  setBtnLoading(btn, true, "Create account");
+
+  const { data, error } = await supabaseClient.auth.signUp({
+    email: usernameToEmail(username), password: pw
+  });
+
+  if (error) {
+    setBtnLoading(btn, false, "Create account");
+    showAuthMsg(error.message.includes("already") ? "That username is already taken." : error.message, "err");
+    return false;
+  }
+
+  const uid = data.user.id;
+  const { error: profileErr } = await supabaseClient.from("users").insert({
+    user_id: uid, username, mobile_no: mobile,
+    status: STATUS.PENDING, created_by: uid, updated_by: uid
+  });
+
+  await supabaseClient.auth.signOut();
+  setBtnLoading(btn, false, "Create account");
+
+  if (profileErr) {
+    showAuthMsg("Registered, but profile setup failed: " + profileErr.message, "err");
+    return false;
+  }
+
+  document.getElementById("registerForm").reset();
+  switchAuthTab("login");
+  showAuthMsg("Account created! An administrator must approve it before you can sign in.", "ok");
+  return false;
+}
+
+/* ---------- LOGOUT ---------- */
+async function handleLogout() {
+  await supabaseClient.auth.signOut();
+  window.location.reload();
+}
+
+/* ---------- CHANGE PASSWORD ---------- */
+function openChangePasswordModal() {
+  toggleUserMenu(false);
+  openModal({
+    title: "Change password",
+    subtitle: currentProfile ? `Signed in as ${currentProfile.username}` : "",
+    bodyHtml: `
+      <div class="field">
+        <label for="newPw1">New password</label>
+        <div class="pw-wrap">
+          <input class="input" type="password" id="newPw1" minlength="8" autocomplete="new-password" placeholder="Min. 8 characters" />
+          <button type="button" class="pw-toggle" onclick="togglePw('newPw1', this)">SHOW</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="newPw2">Confirm new password</label>
+        <input class="input" type="password" id="newPw2" minlength="8" autocomplete="new-password" placeholder="Re-enter password" />
+      </div>
+      <div class="field-error show" id="pwErr" style="display:none"></div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="pwSaveBtn">Save password</button>
+    `,
+    onOpen: () => {
+      document.getElementById("pwSaveBtn").onclick = async () => {
+        const p1 = document.getElementById("newPw1").value;
+        const p2 = document.getElementById("newPw2").value;
+        const errEl = document.getElementById("pwErr");
+        if (p1.length < 8) { errEl.textContent = "Password must be at least 8 characters."; errEl.style.display = "block"; return; }
+        if (p1 !== p2) { errEl.textContent = "Passwords do not match."; errEl.style.display = "block"; return; }
+        const { error } = await supabaseClient.auth.updateUser({ password: p1 });
+        if (error) { errEl.textContent = error.message; errEl.style.display = "block"; return; }
+        closeModal();
+        showToast("Password updated successfully.", "success");
+      };
+    }
+  });
+}
+
+/* ---------- User menu dropdown ---------- */
+function toggleUserMenu(force) {
+  const panel = document.getElementById("userMenuPanel");
+  panel.classList.toggle("open", force === undefined ? !panel.classList.contains("open") : force);
+}
+document.addEventListener("click", (e) => {
+  const panel = document.getElementById("userMenuPanel");
+  if (panel.classList.contains("open") && !e.target.closest(".dropdown")) panel.classList.remove("open");
+});
+
+/* ---------- Side nav: Toggle between Pinned Expanded & Retracted Icon-Rail ---------- */
+function toggleNav() {
+  const shell = document.getElementById("appShell");
+  const nav = document.getElementById("sideNav");
+  const scrim = document.getElementById("navScrim");
+
+  if (window.innerWidth >= 900) {
+    // Desktop: toggle between Pinned Full Sidebar and Retracted Icon-Rail (hover to expand)
+    const isPinned = shell.classList.contains("nav-pinned");
+    shell.classList.toggle("nav-pinned", !isPinned);
+    shell.classList.toggle("nav-retracted", isPinned);
+    try { localStorage.setItem("gha-nav-state", isPinned ? "retracted" : "pinned"); } catch (_) {}
+  } else {
+    // Mobile: slide drawer open/closed
+    const isOpen = nav.classList.contains("open");
+    nav.classList.toggle("open", !isOpen);
+    scrim.classList.toggle("open", !isOpen);
+  }
+}
+
+function closeNav() {
+  document.getElementById("sideNav").classList.remove("open");
+  document.getElementById("navScrim").classList.remove("open");
+}
+
+/* ---------- Build Navigation dynamically from Supabase ---------- */
+async function buildNav(forceRefresh = false) {
+  const scroll = document.getElementById("navScroll");
+  if (!currentProfile) return [];
+
+  const items = await getVisibleMenuForUser(currentProfile, forceRefresh);
+  currentMenuItems = items;
+
+  const groups = {};
+  items.forEach(i => { (groups[i.group] = groups[i.group] || []).push(i); });
+
+  scroll.innerHTML = "";
+  const groupNames = Object.keys(groups);
+
+  groupNames.forEach((groupName, gIdx) => {
+    if (gIdx > 0) {
+      const div = document.createElement("div");
+      div.className = "nav-group-divider";
+      scroll.appendChild(div);
+    }
+    const label = document.createElement("div");
+    label.className = "nav-group-label";
+    label.textContent = groupName;
+    scroll.appendChild(label);
+
+    groups[groupName].forEach(item => {
+      const acc = item.access || {};
+      const isViewOnly = acc.canView && !acc.canCreate && !acc.canEdit && !acc.canDelete;
+      const isLimited = acc.canView && !acc.canEdit && !acc.canDelete && acc.canCreate;
+
+      const el = document.createElement("div");
+      el.className = "nav-item" + (activeMenuId === item.id ? " active" : "");
+      el.dataset.id = item.id;
+      el.title = `${item.label} (${acc.badgeText || "View"})`;
+
+      let dotHtml = "";
+      if (isViewOnly) {
+        dotHtml = '<span class="perm-dot view-only" title="Only View access"></span>';
+      } else if (isLimited) {
+        dotHtml = '<span class="perm-dot limited" title="View &amp; Enter Data access"></span>';
+      }
+
+      el.innerHTML = `<span class="ic">${escapeHtml(item.icon)}</span><span class="nav-label">${escapeHtml(item.label)}</span>${dotHtml}`;
+      el.onclick = () => loadPage(item);
+      scroll.appendChild(el);
+    });
+  });
+
+  if (items.length === 0) {
+    scroll.innerHTML = '<div class="empty-state" style="color:rgba(255,255,255,0.45);padding:32px 14px"><div class="icon" style="opacity:.45">🔐</div><p style="color:rgba(255,255,255,0.45);font-size:12.5px">No pages have been assigned to your account yet.</p></div>';
+  }
+
+  return items;
+}
+
+// Allow Admin pages inside the iframe to trigger a live sidebar refresh
+window.refreshPortalMenu = async function() {
+  await buildNav(true);
+};
+
+function loadPage(item) {
+  activeMenuId = item.id;
+  document.querySelectorAll(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.id === item.id));
+  document.getElementById("frameLoading").style.display = "flex";
+  const frame = document.getElementById("contentFrame");
+  frame.onload = () => { document.getElementById("frameLoading").style.display = "none"; };
+  frame.src = item.file;
+  if (window.innerWidth < 900) closeNav();
+}
+
+/* ---------- Enter app after successful login ---------- */
+async function enterApp() {
+  document.getElementById("authScreen").style.display = "none";
+  document.getElementById("appShell").style.display = "flex";
+
+  const initials = currentProfile.username.charAt(0).toUpperCase();
+  document.getElementById("avatarInitial").textContent = initials;
+  document.getElementById("chipUsername").textContent = currentProfile.username;
+  document.getElementById("chipRole").textContent = currentProfile.role_name || "user";
+  document.getElementById("dropdownHeader").textContent = `@${currentProfile.username}`;
+
+  // Restore saved desktop sidebar state (pinned vs retracted icon rail)
+  const shell = document.getElementById("appShell");
+  if (window.innerWidth >= 900) {
+    let savedState = "pinned";
+    try { savedState = localStorage.getItem("gha-nav-state") || "pinned"; } catch (_) {}
+    shell.classList.toggle("nav-pinned", savedState !== "retracted");
+    shell.classList.toggle("nav-retracted", savedState === "retracted");
+    document.getElementById("sideNav").classList.add("open");
+  }
+
+  const items = await buildNav(true);
+  if (items.length) loadPage(items[0]);
+}
+
+/* ---------- Restore session on page load/refresh ---------- */
+(async function init() {
+  const session = await getSession();
+  if (!session) return;
+  const profile = await getCurrentProfile();
+  if (profile && profile.status === STATUS.ACTIVE) {
+    currentProfile = profile;
+    await enterApp();
+  } else {
+    await supabaseClient.auth.signOut();
+  }
+})();
+
+/* ---------- PWA Service Worker Registration ---------- */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      console.log('[GHA] Service worker registered:', reg.scope);
+    }).catch(err => console.log('[GHA] SW registration failed:', err));
+  });
+}
+
+/* ---------- PWA Install Prompt ---------- */
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const banner = document.getElementById('pwaInstallBanner');
+  if (!sessionStorage.getItem('pwa-banner-dismissed')) {
+    banner.classList.add('show');
+  }
+});
+
+document.getElementById('pwaInstallBtn').addEventListener('click', async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  document.getElementById('pwaInstallBanner').classList.remove('show');
+  if (outcome === 'accepted') showToast('App installed successfully!', 'success');
+});
+
+document.getElementById('pwaDismissBtn').addEventListener('click', () => {
+  document.getElementById('pwaInstallBanner').classList.remove('show');
+  sessionStorage.setItem('pwa-banner-dismissed', '1');
+});
+</script>
+</body>
+</html>
