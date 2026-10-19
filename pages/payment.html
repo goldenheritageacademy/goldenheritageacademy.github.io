@@ -226,7 +226,7 @@ function fld(p, [k, l, t, r], val) {
     h = `<div class="chips" id="${id}">${Object.entries(MODES).map(([m, x]) => `<button type="button" class="chip${cur === m ? " on" : ""}" data-m="${m}">${x}</button>`).join("")}</div>`;
   } else if (t === "sel:cat" || t === "sel:cred") {
     const L = t === "sel:cat" ? cats : creds;
-    h = `<select class="input" id="${id}">${L.map(c => { const v = c.category_id || c.creditor_id; return `<option value="${v}" ${v == val ? "selected" : ""}>${E(t === "sel:cat" ? catLabel(c) : c.name)}</option>`; }).join("")}</select>`;
+    h = `<select class="input" id="${id}">${L.map(c => { const v = t === "sel:cat" ? c.category_id : c.creditor_id; return `<option value="${v}" ${v == val ? "selected" : ""}>${E(t === "sel:cat" ? catLabel(c) : c.name)}</option>`; }).join("")}</select>`;
   } else if (t === "staff") {
     h = `<input class="input" id="${id}" list="staffDl" autocomplete="off" placeholder="Type name…" value="${E(val || "")}"/>`;
   } else {
