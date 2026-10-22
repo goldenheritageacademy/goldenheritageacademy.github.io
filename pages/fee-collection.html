@@ -266,6 +266,8 @@ function computeAdmissionLedger(feeMasterRows, receipts){
 }
 function money(n){ return "₹" + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function todayStr(){ const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+// Tell any open Daily Sheet tab that fee data changed so it refreshes itself
+function notifyFeesChanged(){ try { const c = new BroadcastChannel("ghs-fees"); c.postMessage("changed"); c.close(); } catch(e){} }
 function formatDateOnly(s){ if(!s) return "—"; const d = new Date(s+"T00:00:00"); return isNaN(d) ? escapeHtml(String(s)) : d.toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}); }
 
 /* =====================================================================
@@ -482,6 +484,7 @@ function openMonthlyModal() {
         await logAudit("fee_receipts", currentStudent.reg_no, "insert", null, payload);
         closeModal();
         showToast("Monthly fee collected.", "success");
+        notifyFeesChanged();
         await loadContext();
       };
     }
@@ -555,6 +558,7 @@ function openAdmissionModal() {
         await logAudit("fee_receipts", currentStudent.reg_no, "insert", null, payload);
         closeModal();
         showToast("Admission/Readmission fee collected.", "success");
+        notifyFeesChanged();
         await loadContext();
       };
     }
@@ -653,6 +657,7 @@ function openOtherModal() {
         await logAudit("fee_receipts", currentStudent.reg_no, "insert", null, payload);
         closeModal();
         showToast("Other fee collected.", "success");
+        notifyFeesChanged();
         await loadContext();
       };
     }
@@ -723,11 +728,17 @@ function openEditReceiptModal(receiptId) {
 
         const btn = document.getElementById("erSaveBtn");
         btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
-        const { error } = await supabaseClient.from("fee_receipts").update(updated).eq("receipt_id", receiptId);
+        const { data: savedRows, error } = await supabaseClient.from("fee_receipts").update(updated).eq("receipt_id", receiptId).select("receipt_id,received_date");
         if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Changes"; return; }
+        if (!savedRows || !savedRows.length) {
+          // Supabase reports no error when a row-level-security policy blocks an update — it just changes 0 rows
+          showToast("Nothing was saved — the database did not update this receipt (check the UPDATE permission on fee_receipts).", "error");
+          btn.disabled=false; btn.textContent="Save Changes"; return;
+        }
         await logAudit("fee_receipts", currentStudent.reg_no, "update", r, updated);
         closeModal();
-        showToast("Payment updated.", "success");
+        showToast("Payment updated — now on the " + formatDateOnly(String(savedRows[0].received_date || "").slice(0,10)) + " Daily Sheet.", "success");
+        notifyFeesChanged();
         await loadContext();
       };
     }
@@ -752,6 +763,7 @@ function confirmDeleteReceipt(receiptId) {
         await logAudit("fee_receipts", currentStudent.reg_no, "delete", r, null);
         closeModal();
         showToast("Payment deleted.", "success");
+        notifyFeesChanged();
         await loadContext();
       };
     }
@@ -899,6 +911,7 @@ async function bulkUpload(kind) {
   fileInput.disabled = false;
   fileInput.value = "";
   setTimeout(() => { progressWrap.classList.remove("show"); }, 1500);
+  notifyFeesChanged();
   if (currentStudent) await loadContext();
 }
 
