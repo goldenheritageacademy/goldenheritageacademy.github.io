@@ -28,6 +28,7 @@
   <div class="tab-bar">
     <button class="btn btn-ghost active" id="navUploadBtn" onclick="showSection('upload')">Upload</button>
     <button class="btn btn-ghost" id="navReceiveBtn" onclick="showSection('receive')">Receive Payment</button>
+    <button class="btn btn-ghost" id="navRecordsBtn" onclick="showSection('records')">Receive Records</button>
     <button class="btn btn-ghost" id="navReportBtn" onclick="showSection('report')">Report</button>
   </div>
 
@@ -71,6 +72,37 @@
     </div>
   </div>
 
+  <!-- ===================== SECTION: RECEIVE RECORDS ===================== -->
+  <div id="recordsSection" style="display:none;">
+    <div class="card">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+        <div class="field" style="margin:0;"><label for="rcFrom">From</label><input class="input" id="rcFrom" type="date" /></div>
+        <div class="field" style="margin:0;"><label for="rcTo">To</label><input class="input" id="rcTo" type="date" /></div>
+        <div class="field" style="margin:0;">
+          <label for="rcMode">Mode</label>
+          <select class="input" id="rcMode">
+            <option value="">All</option><option value="cash">Cash</option><option value="bank">Bank</option><option value="phonepe">PhonePe</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0; flex:1; min-width:180px;"><label for="rcSearch">Student name / Reg. No. / Remark</label><input class="input" id="rcSearch" placeholder="Search" /></div>
+        <button class="btn btn-primary" id="rcApplyBtn">Apply</button>
+        <button class="btn btn-ghost" id="rcExportBtn">Export Excel</button>
+      </div>
+      <div id="rcSummary" style="margin-bottom:10px;"></div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Date</th><th>Student</th><th>Reg. No.</th><th>Class</th><th>Year</th>
+              <th>Amount</th><th>Discount</th><th>Mode</th><th>Remark</th><th>Received By</th><th id="rcActionsTh" style="display:none;"></th>
+            </tr>
+          </thead>
+          <tbody id="rcListArea"><tr><td colspan="11"><div class="skeleton" style="height:18px"></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== SECTION 3: REPORT ===================== -->
   <div id="reportSection" style="display:none;">
     <div class="sub-tab-bar">
@@ -106,6 +138,8 @@ let myAccess = null;
 let dueRows = [];
 let receiveRows = [];
 const paymentCache = {};
+let recordRows = [];
+let recordsLoaded = false;
 function isFull() { return myAccess && myAccess.level === "full"; }
 
 async function init() {
@@ -125,6 +159,12 @@ async function init() {
     if (e.key === "Enter") runReceiveSearch(e.target.value.trim());
   });
 
+  // Receive records section
+  document.getElementById("rcActionsTh").style.display = isFull() ? "table-cell" : "none";
+  document.getElementById("rcApplyBtn").onclick = () => loadRecords();
+  document.getElementById("rcExportBtn").onclick = exportRecords;
+  document.getElementById("rcSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") loadRecords(); });
+
   // Report section
   document.getElementById("studentSearchInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") runStudentSearch(e.target.value.trim());
@@ -138,12 +178,15 @@ function showSection(section) {
   document.getElementById("uploadSection").style.display = section === "upload" ? "block" : "none";
   document.getElementById("receiveSection").style.display = section === "receive" ? "block" : "none";
   document.getElementById("reportSection").style.display = section === "report" ? "block" : "none";
+  document.getElementById("recordsSection").style.display = section === "records" ? "block" : "none";
+  document.getElementById("navRecordsBtn").classList.toggle("active", section === "records");
 
   document.getElementById("navUploadBtn").classList.toggle("active", section === "upload");
   document.getElementById("navReceiveBtn").classList.toggle("active", section === "receive");
   document.getElementById("navReportBtn").classList.toggle("active", section === "report");
 
   if (section === "report") loadYearSummary();
+  if (section === "records") loadRecords();
 }
 
 // ================================================================
@@ -455,7 +498,7 @@ function openReceiveModal(row) {
         </select>
       </div>
       <div class="field">
-        <label for="pDesc">Description (optional)</label>
+        <label for="pDesc">Remark (optional)</label>
         <input class="input" id="pDesc" />
       </div>
     `,
@@ -473,7 +516,7 @@ async function savePayment(row) {
   const discEl = document.getElementById("pDiscount");
   const discount = (isFull() && discEl) ? (parseFloat(discEl.value) || 0) : 0;
   const mode = document.getElementById("pMode").value;
-  const description = document.getElementById("pDesc").value.trim() || null;
+  const remark = document.getElementById("pDesc").value.trim() || null;
 
   const errEl = document.getElementById("pAmountErr");
   if (!(amount >= 0) || !date) { errEl.classList.add("show"); return; }
@@ -490,7 +533,7 @@ async function savePayment(row) {
   const record = await withAuditStamp({
     due_id: row.due_id,
     payment_date: date,
-    amount, discount, mode, description
+    amount, discount, mode, remark
   }, { isNew: true });
 
   const { data, error } = await supabaseClient
@@ -606,7 +649,7 @@ async function loadPaymentHistory(dueId) {
   el.innerHTML = `
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>Date</th><th>Amount</th><th>Discount</th><th>Mode</th><th>Description</th>${isFull() ? "<th></th>" : ""}</tr></thead>
+        <thead><tr><th>Date</th><th>Amount</th><th>Discount</th><th>Mode</th><th>Remark</th>${isFull() ? "<th></th>" : ""}</tr></thead>
         <tbody>
           ${data.map(p => { paymentCache[p.payment_id] = p; return `
             <tr>
@@ -614,7 +657,7 @@ async function loadPaymentHistory(dueId) {
               <td>₹${Number(p.amount).toFixed(2)}</td>
               <td>₹${Number(p.discount).toFixed(2)}</td>
               <td>${escapeHtml(p.mode)}</td>
-              <td>${p.description ? escapeHtml(p.description) : "-"}</td>
+              <td>${p.remark ? escapeHtml(p.remark) : "-"}</td>
               ${isFull() ? `<td style="white-space:nowrap;">
                 <button class="btn btn-ghost btn-sm" onclick='openEditPaymentModal("${p.payment_id}", "${dueId}")'>Edit</button>
                 <button class="btn btn-danger btn-sm" onclick='confirmDeletePayment("${p.payment_id}", "${dueId}")'>Delete</button>
@@ -740,6 +783,7 @@ async function refreshAfterChange() {
   const ss = document.getElementById("studentSearchInput").value.trim();
   if (ss) await runStudentSearch(ss);
   await loadYearSummary();
+  if (recordsLoaded) await loadRecords();
 }
 
 async function openDiscountModal(ref, source) {
@@ -800,7 +844,7 @@ async function saveDiscount(bal) {
     amount: 0,
     discount,
     mode: "cash",
-    description: reason ? "Discount: " + reason : "Discount"
+    remark: reason ? "Discount: " + reason : "Discount"
   }, { isNew: true });
 
   const { data, error } = await supabaseClient
@@ -838,7 +882,7 @@ function openEditPaymentModal(paymentId, dueId) {
           ${modes.map(m => `<option value="${escapeHtml(m)}" ${m === p.mode ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}
         </select>
       </div>
-      <div class="field"><label for="epDesc">Description</label><input class="input" id="epDesc" value="${p.description ? escapeHtml(p.description) : ""}" /></div>
+      <div class="field"><label for="epDesc">Remark (optional)</label><input class="input" id="epDesc" value="${p.remark ? escapeHtml(p.remark) : ""}" /></div>
     `,
     footHtml: `
       <button class="btn btn-ghost" data-close>Cancel</button>
@@ -854,7 +898,7 @@ async function savePaymentEdit(existing, dueId) {
     amount: parseFloat(document.getElementById("epAmount").value),
     discount: parseFloat(document.getElementById("epDiscount").value) || 0,
     mode: document.getElementById("epMode").value,
-    description: document.getElementById("epDesc").value.trim() || null
+    remark: document.getElementById("epDesc").value.trim() || null
   };
   const errEl = document.getElementById("epErr");
   if (!updated.payment_date || !(updated.amount >= 0) || !(updated.discount >= 0)) { errEl.classList.add("show"); return; }
@@ -883,6 +927,97 @@ async function savePaymentEdit(existing, dueId) {
   showToast("Payment updated.", "success");
   closeModal();
   await refreshAfterChange();
+}
+
+// ================================================================
+// SECTION: Receive Records (ledger of every old-due receipt)
+// ================================================================
+async function loadRecords() {
+  const tbody = document.getElementById("rcListArea");
+  tbody.innerHTML = `<tr><td colspan="11"><div class="skeleton" style="height:18px"></div></td></tr>`;
+
+  let q = supabaseClient
+    .from("due_payments")
+    .select("*, student_old_dues(student_name, registration_number, class, due_year)")
+    .order("payment_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(2000);
+
+  const from = document.getElementById("rcFrom").value;
+  const to = document.getElementById("rcTo").value;
+  const mode = document.getElementById("rcMode").value;
+  if (from) q = q.gte("payment_date", from);
+  if (to) q = q.lte("payment_date", to);
+  if (mode) q = q.eq("mode", mode);
+
+  const { data, error } = await q;
+  if (error) {
+    showToast("Failed to load records: " + error.message, "error");
+    tbody.innerHTML = "";
+    return;
+  }
+  recordsLoaded = true;
+
+  const term = document.getElementById("rcSearch").value.trim().toLowerCase();
+  recordRows = (data || []).filter(r => {
+    if (!term) return true;
+    const d = r.student_old_dues || {};
+    return [d.student_name, d.registration_number, r.remark].some(v => v && String(v).toLowerCase().includes(term));
+  });
+  recordRows.forEach(r => { paymentCache[r.payment_id] = r; });
+
+  const totAmt = recordRows.reduce((a, r) => a + Number(r.amount), 0);
+  const totDisc = recordRows.reduce((a, r) => a + Number(r.discount), 0);
+  document.getElementById("rcSummary").innerHTML =
+    `<strong>${recordRows.length}</strong> record(s) · Received: <strong>₹${totAmt.toFixed(2)}</strong> · Discount: <strong>₹${totDisc.toFixed(2)}</strong>`;
+
+  if (recordRows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><div class="icon">📄</div><p>No receive records found.</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = recordRows.map((r, i) => {
+    const d = r.student_old_dues || {};
+    return `
+      <tr>
+        <td>${escapeHtml(r.payment_date)}</td>
+        <td>${escapeHtml(d.student_name || "-")}</td>
+        <td>${escapeHtml(d.registration_number || "-")}</td>
+        <td>${escapeHtml(d.class || "-")}</td>
+        <td>${escapeHtml(d.due_year || "-")}</td>
+        <td>₹${Number(r.amount).toFixed(2)}</td>
+        <td>₹${Number(r.discount).toFixed(2)}</td>
+        <td>${escapeHtml(r.mode)}</td>
+        <td>${r.remark ? escapeHtml(r.remark) : "-"}</td>
+        <td>${r.created_by ? escapeHtml(String(r.created_by).slice(0, 8)) : "-"}</td>
+        ${isFull() ? `<td style="white-space:nowrap;">
+          <button class="btn btn-ghost btn-sm" onclick='openEditPaymentModal("${r.payment_id}", "${r.due_id}")'>Edit</button>
+          <button class="btn btn-danger btn-sm" onclick='confirmDeletePayment("${r.payment_id}", "${r.due_id}")'>Delete</button>
+        </td>` : ""}
+      </tr>`;
+  }).join("");
+}
+
+function exportRecords() {
+  if (!recordRows.length) { showToast("Nothing to export.", "error"); return; }
+  const rows = recordRows.map(r => {
+    const d = r.student_old_dues || {};
+    return {
+      "Date": r.payment_date,
+      "Student Name": d.student_name || "",
+      "Registration Number": d.registration_number || "",
+      "Class": d.class || "",
+      "Year": d.due_year || "",
+      "Amount Received": Number(r.amount),
+      "Discount": Number(r.discount),
+      "Mode": r.mode,
+      "Remark": r.remark || ""
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Old Due Receipts");
+  XLSX.writeFile(wb, `old-due-receipts-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 init();
