@@ -272,6 +272,27 @@
       <div id="feeNotes"></div>
     </section>
 
+    <!-- 2b · OLD DUE RECEIVED (hidden when empty) -->
+    <section class="ds-panel" id="oldDueSection" style="display:none;">
+      <div class="ds-panel-head">
+        <h2>Old Due · Received Today</h2>
+        <span class="ds-count" id="oldDueCount">0</span>
+      </div>
+      <div class="ds-table-wrap">
+        <table class="ds-table" id="oldDueTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Student</th><th>Class</th><th>Due Year</th>
+              <th class="num">Received</th><th>Mode</th>
+              <th class="num">Discount</th><th>Remark</th><th>Received By</th>
+            </tr>
+          </thead>
+          <tbody id="oldDueBody"></tbody>
+          <tfoot id="oldDueFoot"></tfoot>
+        </table>
+      </div>
+    </section>
+
     <!-- 3 · VOUCHERS -->
     <section class="ds-panel">
       <div class="ds-panel-head">
@@ -344,6 +365,11 @@
    PAGE_ID must match the id added in menu.js.
    ============================================================================ */
 const PAGE_ID = "daily-sheet";
+
+/* Old-due receipts are listed in their own section. Set to true if the money
+   received through Old Dues should also be added to Cash / Bank / PhonePe in the
+   opening & closing funds (leave false if it is already entered elsewhere). */
+const INCLUDE_OLD_DUE_IN_FUNDS = false;
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
 const $ = id => document.getElementById(id);
@@ -501,12 +527,17 @@ async function init(){
 /* ── Load everything once, then derive opening + closing from the same data ── */
 async function loadDataset(date){
   const sb = supabaseClient;
-  const [receipts, undatedRes, vouchers, cfIn, cfOut, xfers, students, feeMaster, oldDues, duePayments, feeCats] =
+  const RCPT_COLS = "receipt_id,student_reg_no,fee_type,category_id,for_months,amount_cash,amount_bank,amount_phonepe,discount,remark,received_date,recorded_at,recorded_by";
+  const [receipts, dayReceipts, undatedRes, vouchers, cfIn, cfOut, xfers, students, feeMaster, oldDues, duePayments, feeCats, dayOldPayments] =
     await Promise.all([
       // every receipt whose Fee Receive Date is on/before the day
       fetchAll(() => sb.from("fee_receipts")
         .select("receipt_id,student_reg_no,fee_type,category_id,for_months,amount_cash,amount_bank,amount_phonepe,discount,remark,received_date,recorded_at,recorded_by")
         .lt("received_date", shiftDay(date, 1))   // everything up to the END of the selected day
+        .order("receipt_id")),
+      // the selected day on its own — guarantees edited receipts are never lost in the big paged load above
+      fetchAll(() => sb.from("fee_receipts").select(RCPT_COLS)
+        .gte("received_date", date).lt("received_date", shiftDay(date, 1))
         .order("receipt_id")),
       // count of receipts with no Fee Receive Date (cannot be placed on any day)
       sb.from("fee_receipts").select("receipt_id", { count:"exact", head:true }).is("received_date", null),
@@ -521,12 +552,24 @@ async function loadDataset(date){
       fetchAll(() => sb.from("fee_master")
         .select("student_reg_no,type,amount,recorded_at").order("recorded_at").order("student_reg_no")),
       fetchAll(() => sb.from("student_old_dues").select("due_amount").order("due_amount")),
-      fetchAll(() => sb.from("due_payments").select("amount,discount,payment_date")
-        .lte("payment_date", date).order("payment_date").order("amount")),
+      fetchAll(() => sb.from("due_payments").select("payment_id,amount,discount,mode,payment_date")
+        .lte("payment_date", date).order("payment_date").order("payment_id")),
       fetchAll(() => sb.from("fee_categories").select("category_id,name").order("category_id")),
+      // old-due receipts on the selected day, with the student details
+      fetchAll(() => sb.from("due_payments")
+        .select("payment_id,amount,discount,mode,remark,payment_date,created_by,created_at,student_old_dues(student_name,registration_number,class,due_year)")
+        .eq("payment_date", date).order("created_at").order("payment_id")),
     ]);
 
-  return { receipts, undatedCount: undatedRes.count || 0, vouchers, cfIn, cfOut, xfers, students, feeMaster, oldDues, duePayments, feeCats };
+  // Merge: anything the day-query found that the big load missed gets added
+  const have = new Set(receipts.map(r => String(r.receipt_id)));
+  const missed = dayReceipts.filter(r => !have.has(String(r.receipt_id)));
+  if(missed.length){
+    console.warn(`Daily sheet: ${missed.length} receipt(s) for ${date} were missing from the main load and were recovered`, missed);
+    receipts.push(...missed);
+  }
+
+  return { receipts, undatedCount: undatedRes.count || 0, vouchers, cfIn, cfOut, xfers, students, feeMaster, oldDues, duePayments, feeCats, dayOldPayments };
 }
 
 /* ── Position (funds + dues) as at the END of a given date ─────────────────── */
@@ -552,6 +595,14 @@ function computePosition(ds, date, idx){
     bal[x.from_account] = (bal[x.from_account] || 0) - amt;
     bal[x.to_account]   = (bal[x.to_account]   || 0) + amt;
   });
+
+  if(INCLUDE_OLD_DUE_IN_FUNDS){
+    ds.duePayments.forEach(r => {
+      if(r.payment_date > date) return;
+      const m = r.mode || "cash";
+      bal[m] = (bal[m] || 0) + Number(r.amount || 0);
+    });
+  }
 
   // Admission / readmission due
   const admCharged = ds.feeMaster
@@ -624,13 +675,14 @@ async function loadSheet(forceRecalc = false, silent = false){
     const dayOut  = ds.cfOut.filter(r => r.txn_date === date);
     const dayXfer = ds.xfers.filter(r => r.txn_date === date);
 
-    await resolveUsers([...dayFees.map(r => r.recorded_by), ...dayVouchers.map(voucherUserId)]);
+    await resolveUsers([...dayFees.map(r => r.recorded_by), ...dayVouchers.map(voucherUserId), ...ds.dayOldPayments.map(r => r.created_by)]);
 
     $("bannerDate").textContent = fmtLong(date);
-    $("bannerMeta").innerHTML = `Generated ${E(new Date().toLocaleString("en-IN"))}<br/>${dayFees.length} receipt${dayFees.length!==1?"s":""} · ${dayVouchers.length} voucher${dayVouchers.length!==1?"s":""}`;
+    $("bannerMeta").innerHTML = `Generated ${E(new Date().toLocaleString("en-IN"))}<br/>${dayFees.length} receipt${dayFees.length!==1?"s":""} · ${dayVouchers.length} voucher${dayVouchers.length!==1?"s":""}${ds.dayOldPayments.length ? ` · ${ds.dayOldPayments.length} old-due receipt${ds.dayOldPayments.length!==1?"s":""}` : ""}`;
 
     renderPosition("openingBody", opening, null);
     renderFeeTable(dayFees, idx.studentMap, catMap, ds.undatedCount);
+    renderOldDueTable(ds.dayOldPayments);
     renderVoucherTable(dayVouchers);
     renderCFTable(dayIn, dayOut);
     renderXferTable(dayXfer);
@@ -771,6 +823,40 @@ function renderFeeTable(rows, studentMap, catMap, undatedCount){
     kpi("Total Received", grand, true) +
     kpi("Cash", tot.cash) + kpi("Bank", tot.bank) + kpi("PhonePe", tot.phonepe) +
     kpi("Discount Given", tot.disc);
+}
+
+/* ── RENDER: old-due receipts (section hidden when there is nothing) ──────── */
+function renderOldDueTable(rows){
+  const sec = $("oldDueSection");
+  if(!rows.length){ sec.style.display = "none"; $("oldDueBody").innerHTML = ""; $("oldDueFoot").innerHTML = ""; return; }
+  sec.style.display = "block";
+  $("oldDueCount").textContent = `${rows.length} receipt${rows.length!==1?"s":""}`;
+
+  let totAmt = 0, totDisc = 0;
+  $("oldDueBody").innerHTML = rows.map((r,i) => {
+    const d = r.student_old_dues || {};
+    const amt = Number(r.amount||0), disc = Number(r.discount||0);
+    totAmt += amt; totDisc += disc;
+    return `<tr>
+      <td class="idx">${i+1}</td>
+      <td><div class="nm">${E(d.student_name || "—")}</div><div class="sub">Reg ${E(d.registration_number || "—")}</div></td>
+      <td><span class="cls-pill">${E(classLabel(d.class))}</span></td>
+      <td><span class="tag tag-o">Old Due</span><div class="for-months">${E(d.due_year || "")}</div></td>
+      <td class="num">${amt > 0 ? inr(amt) : `<span class="muted">—</span>`}</td>
+      <td>${amt > 0 ? modeBadge(r.mode) : `<span class="muted">Discount only</span>`}</td>
+      <td class="num">${disc > 0 ? inr(disc) : `<span class="muted">—</span>`}</td>
+      <td>${E(r.remark || "")}</td>
+      <td>${userCell(r.created_by)}</td>
+    </tr>`;
+  }).join("");
+
+  $("oldDueFoot").innerHTML = `<tr>
+    <td colspan="4">Total · ${rows.length} receipt${rows.length!==1?"s":""}</td>
+    <td class="num">${inr(totAmt)}</td>
+    <td></td>
+    <td class="num">${inr(totDisc)}</td>
+    <td></td><td></td>
+  </tr>`;
 }
 
 /* ── RENDER: vouchers ──────────────────────────────────────────────────────── */
