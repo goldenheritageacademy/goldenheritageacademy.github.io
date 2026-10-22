@@ -159,7 +159,7 @@
   .print-only { display:none; }
 
   /* ── Print ───────────────────────────────────────────── */
-  @page { size:A4 landscape; margin:10mm; }
+  @page { size:A4 portrait; margin:8mm; }
   @media print {
     .no-print, .btn, .ds-date-bar, .page-header { display:none !important; }
     .print-only { display:block; }
@@ -171,6 +171,35 @@
     .ds-table tr { break-inside:avoid; }
     .ds-table thead { display:table-header-group; }
     .ds-table tbody tr:hover td { background:inherit; }
+
+    /* ── Compact layout so wide tables fit A4 portrait ── */
+    html, body { font-size:11px; }
+    .ds-banner { padding:12px 16px; margin-bottom:12px; border-radius:10px; }
+    .ds-banner .b-school { font-size:1.25rem; }
+    .ds-banner .b-date   { font-size:1.05rem; }
+    .ds-banner .b-meta   { font-size:.68rem; }
+    .ds-panel { margin-bottom:12px; border-radius:10px; }
+    .ds-panel-head { padding:8px 12px; }
+    .ds-panel-body { padding:12px; }
+    .ds-cards { grid-template-columns:repeat(4,1fr); gap:6px; }
+    .ds-card { padding:8px 9px; }
+    .ds-card .dc-value { font-size:.95rem; }
+    .ds-card .dc-label, .ds-card .dc-delta { font-size:.58rem; }
+    .ds-kpis { padding:10px 12px; gap:6px; }
+    .ds-kpi { flex:1 1 90px; padding:6px 8px; }
+    .ds-kpi .k-value { font-size:.85rem; }
+    .ds-table-wrap { overflow:visible; }
+    table.ds-table { width:100%; table-layout:auto; font-size:.66rem; }
+    .ds-table thead th { padding:6px 5px; font-size:.56rem; letter-spacing:.03em; white-space:normal; }
+    .ds-table tbody td, .ds-table tfoot td { padding:6px 5px; word-break:break-word; overflow-wrap:anywhere; }
+    .ds-table td.idx { width:20px; }
+    .ds-table td.num, .ds-table th.num { white-space:nowrap; }
+    .ds-table .sub { font-size:.58rem; }
+    .ds-table .for-months { font-size:.62rem; }
+    .cls-pill, .by-pill, .tag { font-size:.58rem; padding:1px 5px; }
+    .mode { font-size:.58rem; padding:1px 6px; gap:4px; }
+    .mode::before { width:5px; height:5px; }
+    .split > span { min-height:18px; }
   }
 </style>
 </head>
@@ -337,7 +366,7 @@ const CLASS_SHORT = {
 const classLabel = c => c ? (CLASS_SHORT[c] || String(c)) : "—";
 
 /* A receipt belongs to its "Fee Receive Date" only — never the entry date. */
-const effDate = r => r.received_date;
+const effDate = r => String(r.received_date || "").slice(0, 10);
 
 /* Supabase returns max 1000 rows per request — page through everything. */
 async function fetchAll(buildQuery){
@@ -445,6 +474,7 @@ async function resolveUsers(ids){
 /* ── State ─────────────────────────────────────────────────────────────────── */
 let myAccess = null;
 let cfCategories = {};
+let sheetLoaded = false, sheetBusy = false;
 
 /* ── Init ──────────────────────────────────────────────────────────────────── */
 async function init(){
@@ -458,6 +488,12 @@ async function init(){
   $("nextBtn").onclick   = () => { $("dsDate").value = shiftDay($("dsDate").value || today(),  1); loadSheet(false); };
   $("dsDate").addEventListener("keydown", e => { if(e.key === "Enter") loadSheet(false); });
 
+  // Re-pull silently when returning to this tab, or when Fee Collection announces a change
+  const refreshIfStale = () => { if(sheetLoaded && !sheetBusy && !document.hidden) loadSheet(false, true); };
+  document.addEventListener("visibilitychange", refreshIfStale);
+  window.addEventListener("focus", refreshIfStale);
+  try { new BroadcastChannel("ghs-fees").onmessage = refreshIfStale; } catch(e){ /* older browsers: focus refresh still works */ }
+
   const { data: cats } = await supabaseClient.from("cash_flow_categories").select("category_id,name");
   (cats||[]).forEach(c => cfCategories[c.category_id] = c.name);
 }
@@ -470,7 +506,7 @@ async function loadDataset(date){
       // every receipt whose Fee Receive Date is on/before the day
       fetchAll(() => sb.from("fee_receipts")
         .select("receipt_id,student_reg_no,fee_type,category_id,for_months,amount_cash,amount_bank,amount_phonepe,discount,remark,received_date,recorded_at,recorded_by")
-        .lte("received_date", date)
+        .lt("received_date", shiftDay(date, 1))   // everything up to the END of the selected day
         .order("receipt_id")),
       // count of receipts with no Fee Receive Date (cannot be placed on any day)
       sb.from("fee_receipts").select("receipt_id", { count:"exact", head:true }).is("received_date", null),
@@ -562,12 +598,16 @@ function buildIndex(ds){
 }
 
 /* ── Master load ───────────────────────────────────────────────────────────── */
-async function loadSheet(forceRecalc = false){
+async function loadSheet(forceRecalc = false, silent = false){
   const date = $("dsDate").value;
   if(!date){ showToast("Please select a date.", "error"); return; }
+  if(sheetBusy) return;
+  sheetBusy = true;
 
-  $("dsContent").style.display = "none";
-  $("loadingOverlay").classList.add("show");
+  if(!silent){
+    $("dsContent").style.display = "none";
+    $("loadingOverlay").classList.add("show");
+  }
 
   try {
     const ds  = await loadDataset(date);
@@ -597,6 +637,7 @@ async function loadSheet(forceRecalc = false){
     renderPosition("closingBody", closing, opening);
 
     $("dsContent").style.display = "block";
+    sheetLoaded = true;
 
     // Keep the cached snapshot in step with the live figures
     const { error: snapErr } = await supabaseClient.from("daily_closing_snapshot").upsert({
@@ -611,6 +652,7 @@ async function loadSheet(forceRecalc = false){
     showToast("Failed to load daily sheet: " + (err.message || err), "error");
     console.error(err);
   } finally {
+    sheetBusy = false;
     $("loadingOverlay").classList.remove("show");
   }
 }
