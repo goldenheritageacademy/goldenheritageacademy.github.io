@@ -9,6 +9,8 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="../assets/js/config.js"></script>
 <script src="../assets/js/common.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   .me-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
   .me-row .field { min-width: 200px; margin-bottom: 0; }
@@ -46,7 +48,7 @@
   <div class="page-header">
     <span class="eyebrow">Academics</span>
     <h1>Mark Entry</h1>
-    <p>Enter marks for the class and subject allotted to you. Type <b>AB</b> for an absent student. Every box must be filled.</p>
+    <p>Teachers can enter marks for allotted subjects; administrators can edit all configured subjects and submitted marks. Type <b>AB</b> for an absent student. Every box must be filled.</p>
   </div>
 
   <div class="card">
@@ -56,6 +58,9 @@
       <div class="field"><label for="mSubject">Subject</label><select class="input" id="mSubject"></select></div>
     </div>
     <div id="mInfo"></div>
+    <div class="me-bar" id="mPdfBar" style="display:none;justify-content:flex-start;margin:0 0 14px;">
+      <button class="btn btn-ghost" id="mPdf" type="button">⬇️ Download PDF (A4)</button>
+    </div>
     <div class="me-bulk" id="mBulk" style="display:none;">
       <b>Bulk entry (Excel)</b>
       <button class="btn" id="mDownload" type="button">⬇️ Download Excel</button>
@@ -66,7 +71,7 @@
     <div id="mTable"></div>
     <div class="me-bar" id="mBar" style="display:none;">
       <span id="mCount" class="ra-muted"></span>
-      <button class="btn btn-primary" id="mSubmit" data-perm="create">✅ Submit marks</button>
+      <button class="btn btn-primary" id="mSubmit" style="display:none;">✅ Submit marks</button>
     </div>
   </div>
 </div>
@@ -95,13 +100,14 @@ async function init() {
   myAccess = await getMyAccess(PAGE_ID);
   if (!myAccess.profile) return;
   isAdmin = /admin/i.test(myAccess.profile.role_name || "");
+  $("mSubmit").style.display = myAccess.canCreate || (isAdmin && myAccess.canEdit) ? "" : "none";
 
   let q = sb().from("result_teacher_alloc").select("*");
   if (!isAdmin) q = q.eq("teacher_id", String(myAccess.profile.user_id));
   const { data, error } = await q;
   if (error) { showToast(error.message, "error"); return; }
   allocs = data || [];
-  if (!allocs.length) {
+  if (!allocs.length && !isAdmin) {
     $("mTable").innerHTML = `<div class="empty-state"><div class="icon">📚</div><p>No class or subject has been allotted to you yet. Please ask the administrator.</p></div>`;
     return;
   }
@@ -112,6 +118,7 @@ async function init() {
   $("mClass").addEventListener("change", onClass);
   $("mSubject").addEventListener("change", loadSheet);
   $("mSubmit").addEventListener("click", submitMarks);
+  $("mPdf").addEventListener("click", downloadMarkSheetPdf);
   $("mDownload").addEventListener("click", downloadTemplate);
   $("mUploadBtn").addEventListener("click", () => $("mFile").click());
   $("mFile").addEventListener("change", onFilePicked);
@@ -125,11 +132,12 @@ async function onExam() {
   const { data } = await sb().from("result_subject_setup").select("*").eq("exam_id", examId).order("sort_order");
   setupByClass = {};
   (data || []).forEach(s => (setupByClass[s.class] ||= []).push(s));
-  const classes = Object.keys(CLASS_LABELS).filter(c => setupByClass[c] && allocs.some(a => a.class === c && setupByClass[c].some(s => s.subject_name === a.subject_name)));
+  const classes = Object.keys(CLASS_LABELS).filter(c => setupByClass[c] &&
+    (isAdmin || allocs.some(a => a.class === c && setupByClass[c].some(s => s.subject_name === a.subject_name))));
   $("mClass").innerHTML = classes.map(c => `<option value="${c}">${CLASS_LABELS[c]}</option>`).join("");
   if (!classes.length) {
     $("mSubject").innerHTML = "";
-    $("mTable").innerHTML = `<div class="empty-state"><div class="icon">📝</div><p>This exam has no subject setup for your allotted classes yet.</p></div>`;
+    $("mTable").innerHTML = `<div class="empty-state"><div class="icon">📝</div><p>${isAdmin ? "This exam has no subject setup for any class yet." : "This exam has no subject setup for your allotted classes yet."}</p></div>`;
     return;
   }
   onClass();
@@ -138,7 +146,7 @@ async function onExam() {
 function onClass() {
   const c = $("mClass").value;
   const mine = new Set(allocs.filter(a => a.class === c).map(a => a.subject_name));
-  const subs = (setupByClass[c] || []).filter(s => mine.has(s.subject_name));
+  const subs = (setupByClass[c] || []).filter(s => isAdmin || mine.has(s.subject_name));
   $("mSubject").innerHTML = subs.map(s => `<option value="${escapeHtml(s.subject_name)}">${escapeHtml(s.subject_name)}</option>`).join("");
   loadSheet();
 }
@@ -158,7 +166,8 @@ const fmt = (v, ab) => ab ? "AB" : (v === null || v === undefined ? "" : String(
 /* ---------- load class sheet ---------- */
 async function loadSheet() {
   const examId = $("mExam").value, klass = $("mClass").value, subject = $("mSubject").value;
-  $("mInfo").innerHTML = ""; $("mTable").innerHTML = ""; $("mBar").style.display = "none"; $("mBulk").style.display = "none"; cur = null;
+  $("mInfo").innerHTML = ""; $("mTable").innerHTML = ""; $("mBar").style.display = "none"; $("mBulk").style.display = "none";
+  $("mPdfBar").style.display = "none"; cur = null;
   if (!examId || !klass || !subject) return;
   const setup = (setupByClass[klass] || []).find(s => s.subject_name === subject);
   if (!setup) return;
@@ -176,10 +185,11 @@ async function loadSheet() {
   cur = { setup, examId, klass, subject, rows: students.map(s => {
     const m = mm[s.reg_no];
     return { reg: s.reg_no, name: s.name, roll: s.roll_no, section: s.section, saved: !!m, unlocked: !!m?.unlocked,
-      locked: !!m && !m.unlocked,
+      locked: !!m && !m.unlocked && !isAdmin,
       w: m ? fmt(m.written, m.written_ab) : "", o: m ? fmt(m.oral, m.oral_ab) : "" };
   }) };
   renderSheet();
+  $("mPdfBar").style.display = "flex";
 }
 
 function renderSheet() {
@@ -188,7 +198,8 @@ function renderSheet() {
   const editable = rows.filter(r => !r.locked).length;
   const lockedCnt = rows.length - editable;
 
-  if (!editable) $("mInfo").innerHTML = `<div class="me-note">✅ All marks for this subject are submitted. You can view them here but not change them. Ask the administrator to unlock if a correction is needed.</div>`;
+  if (isAdmin) $("mInfo").innerHTML = `<div class="me-note">Administrator access: all configured subjects and submitted marks can be edited. Submit to save changes.</div>`;
+  else if (!editable) $("mInfo").innerHTML = `<div class="me-note">✅ All marks for this subject are submitted. You can view them here but not change them. Ask the administrator to unlock if a correction is needed.</div>`;
   else if (lockedCnt) $("mInfo").innerHTML = `<div class="me-note warn">Some students are locked. Only unlocked or new students can be edited.</div>`;
   else $("mInfo").innerHTML = `<div class="me-note">Full marks — Written <b>${setup.written_full}</b>${setup.has_oral ? `, Oral <b>${setup.oral_full}</b>` : " (no oral for this subject)"}. Once submitted you cannot edit.</div>`;
 
@@ -199,7 +210,7 @@ function renderSheet() {
       <td>${escapeHtml(r.roll || "—")}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.section || "—")}</td>
       <td><input class="input me-mark" data-i="${i}" data-f="w" value="${escapeHtml(r.w)}" ${r.locked ? "readonly" : ""} autocomplete="off" inputmode="text" /></td>
       ${setup.has_oral ? `<td><input class="input me-mark" data-i="${i}" data-f="o" value="${escapeHtml(r.o)}" ${r.locked ? "readonly" : ""} autocomplete="off" inputmode="text" /></td>` : ""}
-      <td>${r.locked ? '<span class="me-pill lock">🔒 Submitted</span>' : (r.unlocked ? '<span class="me-pill open">🔓 Unlocked</span>' : '<span class="me-pill new">Pending</span>')}</td>
+      <td>${r.saved && !r.unlocked ? '<span class="me-pill lock">🔒 Submitted</span>' : (r.unlocked ? '<span class="me-pill open">🔓 Unlocked</span>' : '<span class="me-pill new">Pending</span>')}</td>
     </tr>`).join("") + `</tbody></table></div>`;
 
   $("mTable").querySelectorAll(".me-mark:not([readonly])").forEach(inp => {
@@ -217,6 +228,57 @@ function renderSheet() {
   $("mBar").style.display = editable ? "flex" : "none";
   $("mBulk").style.display = editable ? "flex" : "none";
   updateCount();
+}
+
+function downloadMarkSheetPdf() {
+  if (!cur) {
+    showToast("Fetch a mark sheet before downloading the PDF.", "error");
+    return;
+  }
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast("PDF export library is unavailable. Reload the page and try again.", "error");
+    return;
+  }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:"landscape", format:"a4" });
+    const examName = ($("mExam").selectedOptions[0]?.textContent || "").trim();
+    const pageCenter = doc.internal.pageSize.getWidth() / 2;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("Golden Heritage Academy", pageCenter, 14, { align:"center" });
+    doc.setFontSize(11);
+    doc.text(examName, pageCenter, 22, { align:"center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`Class: ${CLASS_LABELS[cur.klass] || cur.klass}  |  Subject: ${cur.subject}`, pageCenter, 29, { align:"center" });
+    if (!cur.rows.length) {
+      doc.text("No active students in this class.", 10, 39);
+    } else {
+      const head = ["Roll", "Name", "Section", `Written / ${cur.setup.written_full}`];
+      if (cur.setup.has_oral) head.push(`Oral / ${cur.setup.oral_full}`);
+      head.push("Status");
+      const body = cur.rows.map(row => {
+        const values = [row.roll || "—", row.name, row.section || "—", row.w];
+        if (cur.setup.has_oral) values.push(row.o);
+        values.push(row.saved && !row.unlocked ? "Submitted" : (row.unlocked ? "Unlocked" : "Pending"));
+        return values;
+      });
+      doc.autoTable({
+        head:[head],
+        body,
+        startY:35,
+        theme:"grid",
+        styles:{ fontSize:8, cellPadding:2, lineWidth:0.25, lineColor:[55,65,81] },
+        headStyles:{ fillColor:[31,41,55], textColor:255, lineWidth:0.25, lineColor:[31,41,55] },
+        margin:{ left:10, right:10 }
+      });
+    }
+    const safe = value => String(value).replace(/[^\w-]+/g, "_").replace(/^_+|_+$/g, "");
+    doc.save(`Marks_${safe(examName)}_${safe(CLASS_LABELS[cur.klass] || cur.klass)}_${safe(cur.subject)}.pdf`);
+  } catch (error) {
+    showToast("Could not create mark sheet PDF: " + (error.message || String(error)), "error");
+  }
 }
 
 function updateCount() {
@@ -264,7 +326,8 @@ async function submitMarks() {
     return;
   }
   if (!payload.length) { showToast("Nothing to submit.", "error"); return; }
-  if (!confirm(`Submit ${subject} marks for ${payload.length} student(s)?\n\nAfter submitting you will not be able to change them.`)) return;
+  const lockMessage = isAdmin ? "\n\nAdministrators can edit these marks again later." : "\n\nAfter submitting you will not be able to change them.";
+  if (!confirm(`Submit ${subject} marks for ${payload.length} student(s)?${lockMessage}`)) return;
 
   $("mSubmit").disabled = true;
   const { error } = await sb().from("result_marks").upsert(payload, { onConflict: "exam_id,student_reg_no,subject_name" });
@@ -431,7 +494,7 @@ function showPreview({ fileName, parsed, fileErrors, rowErrors, valid }) {
         <span class="me-pill ${badRows || fileErrors.length || rowErrors.length ? "open" : "new"}" style="${allErrs.length ? "background:#fee2e2;color:#991b1b" : ""}">${allErrs.length} problem(s)</span>
       </div>
       ${allErrs.length ? `<div class="me-errbox"><b>Nothing has been saved. Fix these in the Excel and upload again:</b><ul>${allErrs.map(e => `<li>${escapeHtml(e)}</li>`).join("")}</ul></div>`
-        : `<div class="me-note">✅ All rows are valid. Click <b>Confirm &amp; submit</b> to save. After submitting you cannot edit these marks.</div>`}
+        : `<div class="me-note">✅ All rows are valid. Click <b>Confirm &amp; submit</b> to save. ${isAdmin ? "Administrators can edit these marks again later." : "After submitting you cannot edit these marks."}</div>`}
       ${table}
     </div>
     <div class="me-modal-f">
