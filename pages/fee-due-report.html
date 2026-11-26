@@ -63,6 +63,8 @@
         <div class="field"><label for="sSearch">Reg No / Name / Mobile No</label>
           <input class="input" id="sSearch" placeholder="Type to search..." /></div>
         <button class="btn btn-primary" id="sSearchBtn">Search</button>
+        <button class="btn btn-ghost" id="sExportExcelBtn">⬇ Export Excel</button>
+        <button class="btn btn-ghost" id="sExportPdfBtn">⬇ Export PDF</button>
       </div>
       <div id="sPickArea"></div>
       <div id="sResultArea"></div>
@@ -79,6 +81,8 @@
           <label for="cIncludeInactive" style="margin:0;">Include deactivated students</label>
         </div>
         <button class="btn btn-primary" id="cGenBtn">Generate</button>
+        <button class="btn btn-ghost" id="cExportExcelBtn">⬇ Export Excel</button>
+        <button class="btn btn-ghost" id="cExportPdfBtn">⬇ Export PDF</button>
       </div>
       <div id="cResultArea"></div>
     </section>
@@ -120,6 +124,7 @@
           <select class="input" id="dClass"><option value="">All classes</option></select></div>
         <button class="btn btn-primary" id="dGenBtn">Generate</button>
         <button class="btn btn-ghost" id="dExportBtn">⬇ Export Excel</button>
+        <button class="btn btn-ghost" id="dExportPdfBtn">⬇ Export PDF</button>
       </div>
       <div id="dResultArea"></div>
     </section>
@@ -131,9 +136,13 @@
 <script>
 const PAGE_ID = "fee-due-report"; // must match menu.js id
 let myAccess = null;
+let lastStudentReport = null;
+let lastClasswiseReport = null;
 let lastDateRangeRows = []; // for export
+let lastDateRangeMeta = null;
 let lastMonthwiseRows = []; // for filter + export
 let lastMonthwiseMeta = null; // { yy, mm }
+let lastMonthwiseSummary = null;
 
 const CLASS_LABELS = {
   "1":"Class 1","2":"Class 2","3":"Class 3",
@@ -155,16 +164,16 @@ function monthsBetweenInclusive(y1,m1,y2,m2){
     out.push({y,m});
     const n = addMonth(y,m); y=n.y; m=n.m; guard++;
   }
-  function sessionForClass(klass, date = new Date()){
-    const year = date.getFullYear();
-    if(parseInt(klass,10)>=10){const start=date.getMonth()>=3?year:year-1;return `${start}-${String(start+1).slice(-2)}`;}
-    return String(year);
-  }
-  function sessionMonths(klass, session){
-    if(parseInt(klass,10)>=10){const start=Number(String(session).slice(0,4));return [...monthsBetweenInclusive(start,4,start,12),...monthsBetweenInclusive(start+1,1,start+1,3)];}
-    const year=Number(session);return monthsBetweenInclusive(year,1,year,12);
-  }
   return out;
+}
+function sessionForClass(klass, date = new Date()){
+  const year = date.getFullYear();
+  if(parseInt(klass,10)>=10){const start=date.getMonth()>=3?year:year-1;return `${start}-${String(start+1).slice(-2)}`;}
+  return String(year);
+}
+function sessionMonths(klass, session){
+  if(parseInt(klass,10)>=10){const start=Number(String(session).slice(0,4));return [...monthsBetweenInclusive(start,4,start,12),...monthsBetweenInclusive(start+1,1,start+1,3)];}
+  const year=Number(session);return monthsBetweenInclusive(year,1,year,12);
 }
 function getAcademicWindow(klass, today){
   const year = today.getFullYear();
@@ -308,13 +317,18 @@ async function init() {
 
   document.getElementById("sSearchBtn").addEventListener("click", studentSearch);
   document.getElementById("sSearch").addEventListener("keydown", e=>{ if(e.key==="Enter") studentSearch(); });
+  document.getElementById("sExportExcelBtn").addEventListener("click", exportStudentExcel);
+  document.getElementById("sExportPdfBtn").addEventListener("click", exportStudentPDF);
   document.getElementById("cGenBtn").addEventListener("click", generateClasswise);
+  document.getElementById("cExportExcelBtn").addEventListener("click", exportClasswiseExcel);
+  document.getElementById("cExportPdfBtn").addEventListener("click", exportClasswisePDF);
   document.getElementById("mGenBtn").addEventListener("click", generateMonthwise);
   document.getElementById("mStatusFilter").addEventListener("change", renderMonthwiseTable);
   document.getElementById("mExportExcelBtn").addEventListener("click", exportMonthwiseExcel);
   document.getElementById("mExportPdfBtn").addEventListener("click", exportMonthwisePDF);
   document.getElementById("dGenBtn").addEventListener("click", generateDateRange);
   document.getElementById("dExportBtn").addEventListener("click", exportDateRange);
+  document.getElementById("dExportPdfBtn").addEventListener("click", exportDateRangePDF);
 }
 
 /* =====================================================================
@@ -323,7 +337,9 @@ async function init() {
 async function studentSearch() {
   const term = document.getElementById("sSearch").value.trim();
   const pickArea = document.getElementById("sPickArea");
+  lastStudentReport = null;
   pickArea.innerHTML = "";
+  document.getElementById("sResultArea").innerHTML = "";
   if (!term) { showToast("Type something to search.", "error"); return; }
 
   const { data, error } = await supabaseClient.from("student_master").select("*")
@@ -370,6 +386,8 @@ async function showStudentReport(student) {
   const previousDue=breakdown.filter(row=>row.session!==selectedSession&&(row.monthlyDue+row.admissionDue)>0);
   const previousTotal=previousDue.reduce((sum,row)=>sum+row.monthlyDue+row.admissionDue,0);
   const otherTotal = otherReceipts.reduce((s,r)=>s+receiptTotal(r),0);
+  lastStudentReport = { student, selectedSession, monthlyLedger:mLed, admissionLedger:aLed,
+    previousDue, previousTotal, otherTotal, receipts:receipts||[], categories:categories||[] };
 
   resultArea.innerHTML = `
     <div class="fr-student-card">
@@ -414,6 +432,106 @@ async function showStudentReport(student) {
   `;
 }
 
+function receiptTypeLabel(receipt) {
+  return receipt.fee_type==="admission_readmission" ? "Admission/Readm."
+    : receipt.fee_type ? receipt.fee_type[0].toUpperCase()+receipt.fee_type.slice(1) : "";
+}
+function receiptDetail(receipt, categories) {
+  if (receipt.fee_type==="monthly") return (receipt.for_months||[]).join(", ");
+  if (receipt.fee_type==="other") return categories.find(c=>c.category_id===receipt.category_id)?.name || "—";
+  return "—";
+}
+function safeFilePart(value) {
+  return String(value||"").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "report";
+}
+function exportStudentExcel() {
+  if (!lastStudentReport) { showToast("Search for a student first.", "error"); return; }
+  const { student, selectedSession, monthlyLedger, admissionLedger, previousDue, previousTotal, otherTotal, receipts, categories } = lastStudentReport;
+  const workbook = XLSX.utils.book_new();
+  const summary = [
+    ["Student Due & Receipts Report"],
+    ["Name", student.name], ["Reg No", student.reg_no],
+    ["Class", CLASS_LABELS[student.class]||student.class], ["Session", selectedSession],
+    ["Status", student.status], ["Monthly Due", monthlyLedger.totalDue],
+    ["Admission/Readmission Due", admissionLedger.due], ["Other Fee Received", otherTotal],
+    ["Previous Session Due", previousTotal],
+    ["Total Due", monthlyLedger.totalDue+admissionLedger.due+previousTotal]
+  ];
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(summary), "Summary");
+
+  const monthly = [["Month","Rate","Paid","Due","Status"]];
+  monthlyLedger.windowMonths.forEach(month=>{
+    const entry = monthlyLedger.ledgerByKey[month.key];
+    monthly.push([month.label, entry.rate, entry.paid, entry.due, month.status]);
+  });
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(monthly), "Monthly Fee");
+
+  const sessions = [["Session","Monthly Due","Admission Due","Total Due"]];
+  previousDue.forEach(row=>sessions.push([row.session,row.monthlyDue,row.admissionDue,row.monthlyDue+row.admissionDue]));
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sessions), "Previous Sessions");
+
+  const payments = [["Date","Type","Detail","Cash","Bank","PhonePe","Discount","Remark"]];
+  receipts.forEach(receipt=>payments.push([
+    formatDateTime(receipt.recorded_at), receiptTypeLabel(receipt), receiptDetail(receipt,categories),
+    Number(receipt.amount_cash||0), Number(receipt.amount_bank||0), Number(receipt.amount_phonepe||0),
+    Number(receipt.discount||0), receipt.remark||""
+  ]));
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(payments), "Payments");
+  XLSX.writeFile(workbook, `student_fee_report_${safeFilePart(student.reg_no)}.xlsx`);
+}
+function exportStudentPDF() {
+  if (!lastStudentReport) { showToast("Search for a student first.", "error"); return; }
+  const { student, selectedSession, monthlyLedger, admissionLedger, previousDue, previousTotal, otherTotal, receipts, categories } = lastStudentReport;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(14);
+  doc.text("Student Due & Receipts Report", 14, 16);
+  doc.setFontSize(10);
+  doc.text(`${student.name} (${student.reg_no}) | ${CLASS_LABELS[student.class]||student.class} | Session ${selectedSession} | ${student.status}`, 14, 22);
+  doc.autoTable({
+    startY:28,
+    head:[["Summary","Amount"]],
+    body:[
+      ["Monthly Due",money(monthlyLedger.totalDue)],
+      ["Admission/Readmission Due",money(admissionLedger.due)],
+      ["Other Fee Received",money(otherTotal)],
+      ["Previous Session Due",money(previousTotal)],
+      ["Total Due",money(monthlyLedger.totalDue+admissionLedger.due+previousTotal)]
+    ],
+    styles:{fontSize:9}, headStyles:{fillColor:[176,141,87]}
+  });
+  let nextY=doc.lastAutoTable.finalY+8;
+  if (previousDue.length) {
+    doc.autoTable({
+      startY:nextY,
+      head:[["Previous Session","Monthly Due","Admission Due","Total Due"]],
+      body:previousDue.map(row=>[row.session,money(row.monthlyDue),money(row.admissionDue),money(row.monthlyDue+row.admissionDue)]),
+      styles:{fontSize:9}, headStyles:{fillColor:[176,141,87]}
+    });
+    nextY=doc.lastAutoTable.finalY+8;
+  }
+  doc.autoTable({
+    startY:nextY,
+    head:[["Month","Rate","Paid","Due","Status"]],
+    body:monthlyLedger.windowMonths.map(month=>{
+      const entry=monthlyLedger.ledgerByKey[month.key];
+      return [month.label,money(entry.rate),money(entry.paid),money(entry.due),month.status];
+    }),
+    styles:{fontSize:8}, headStyles:{fillColor:[176,141,87]}
+  });
+  doc.autoTable({
+    startY:doc.lastAutoTable.finalY+8,
+    head:[["Date","Type","Detail","Cash","Bank","PhonePe","Discount","Remark"]],
+    body:receipts.length ? receipts.map(receipt=>[
+      formatDateTime(receipt.recorded_at),receiptTypeLabel(receipt),receiptDetail(receipt,categories),
+      money(receipt.amount_cash),money(receipt.amount_bank),money(receipt.amount_phonepe),
+      money(receipt.discount),receipt.remark||""
+    ]) : [["—","—","No payments recorded","","","","",""]],
+    styles:{fontSize:7}, headStyles:{fillColor:[176,141,87]}
+  });
+  doc.save(`student_fee_report_${safeFilePart(student.reg_no)}.pdf`);
+}
+
 /* =====================================================================
    CLASS-WISE TAB
    ===================================================================== */
@@ -421,6 +539,7 @@ async function generateClasswise() {
   const klass = document.getElementById("cClass").value;
   const includeInactive = document.getElementById("cIncludeInactive").checked;
   const resultArea = document.getElementById("cResultArea");
+  lastClasswiseReport = null;
   resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
 
   let students, feeMaster, receipts;
@@ -431,7 +550,11 @@ async function generateClasswise() {
       if (!includeInactive) q = q.eq("status", "active");
       return q;
     });
-    if (!students.length) { resultArea.innerHTML = `<div class="empty-state"><p>No students match.</p></div>`; return; }
+    if (!students.length) {
+      lastClasswiseReport = { rows:[], klass, includeInactive };
+      resultArea.innerHTML = `<div class="empty-state"><p>No students match.</p></div>`;
+      return;
+    }
     const regNos = students.map(s=>s.reg_no);
     [feeMaster, receipts] = await Promise.all([
       fetchByRegNos("fee_master", regNos),
@@ -451,6 +574,7 @@ async function generateClasswise() {
     sumMonthlyDue += monthlyDue; sumAdmDue += admDue; sumReceived += received;
     return { s, monthlyDue, admDue, received };
   });
+  lastClasswiseReport = { rows, klass, includeInactive, sumMonthlyDue, sumAdmDue, sumReceived };
 
   resultArea.innerHTML = `
     <div class="fr-cards">
@@ -472,6 +596,56 @@ async function generateClasswise() {
   `;
 }
 
+function exportClasswiseExcel() {
+  if (!lastClasswiseReport) { showToast("Generate a report first.", "error"); return; }
+  const { rows, klass, includeInactive, sumMonthlyDue=0, sumAdmDue=0, sumReceived=0 } = lastClasswiseReport;
+  const workbook = XLSX.utils.book_new();
+  const summary = [
+    ["Class-wise Due & Collection"],
+    ["Class", klass ? (CLASS_LABELS[klass]||klass) : "All classes"],
+    ["Includes deactivated students", includeInactive ? "Yes" : "No"],
+    ["Students", rows.length], ["Total Monthly Due", sumMonthlyDue],
+    ["Total Admission Due", sumAdmDue], ["Total Due", sumMonthlyDue+sumAdmDue],
+    ["Total Received (all-time)", sumReceived]
+  ];
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(summary), "Summary");
+  const students = [["Reg No","Name","Class","Session","Status","Monthly Due","Admission Due","Total Due","Received"]];
+  rows.forEach(row=>students.push([
+    row.s.reg_no,row.s.name,CLASS_LABELS[row.s.class]||row.s.class,
+    row.s.academic_session||"—",row.s.status,row.monthlyDue,row.admDue,
+    row.monthlyDue+row.admDue,row.received
+  ]));
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(students), "Students");
+  XLSX.writeFile(workbook, `classwise_fee_due_${safeFilePart(klass||"all_classes")}.xlsx`);
+}
+function exportClasswisePDF() {
+  if (!lastClasswiseReport) { showToast("Generate a report first.", "error"); return; }
+  const { rows, klass, includeInactive, sumMonthlyDue=0, sumAdmDue=0, sumReceived=0 } = lastClasswiseReport;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({orientation:"landscape"});
+  doc.setFontSize(14);
+  doc.text("Class-wise Due & Collection", 14, 16);
+  doc.setFontSize(10);
+  doc.text(`Class: ${klass ? (CLASS_LABELS[klass]||klass) : "All classes"} | Includes deactivated: ${includeInactive ? "Yes" : "No"}`, 14, 22);
+  doc.autoTable({
+    startY:28,
+    head:[["Students","Monthly Due","Admission Due","Total Due","Received"]],
+    body:[[String(rows.length),money(sumMonthlyDue),money(sumAdmDue),money(sumMonthlyDue+sumAdmDue),money(sumReceived)]],
+    styles:{fontSize:9}, headStyles:{fillColor:[176,141,87]}
+  });
+  doc.autoTable({
+    startY:doc.lastAutoTable.finalY+8,
+    head:[["Reg No","Name","Class","Session","Status","Monthly Due","Admission Due","Total Due","Received"]],
+    body:rows.length ? rows.map(row=>[
+      row.s.reg_no,row.s.name,CLASS_LABELS[row.s.class]||row.s.class,
+      row.s.academic_session||"—",row.s.status,money(row.monthlyDue),money(row.admDue),
+      money(row.monthlyDue+row.admDue),money(row.received)
+    ]) : [["—","No students match","","","","","","",""]],
+    styles:{fontSize:7}, headStyles:{fillColor:[176,141,87]}
+  });
+  doc.save(`classwise_fee_due_${safeFilePart(klass||"all_classes")}.pdf`);
+}
+
 /* =====================================================================
    MONTH-WISE TAB
    ===================================================================== */
@@ -480,6 +654,9 @@ async function generateMonthwise() {
   if (!val) { showToast("Pick a month.", "error"); return; }
   const [yy, mm] = val.split("-").map(Number);
   const resultArea = document.getElementById("mResultArea");
+  lastMonthwiseMeta = null;
+  lastMonthwiseSummary = null;
+  lastMonthwiseRows = [];
   resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
 
   let students, feeMaster, receipts;
@@ -527,6 +704,7 @@ async function generateMonthwise() {
 
   lastMonthwiseRows = dueRows;
   lastMonthwiseMeta = { yy, mm };
+  lastMonthwiseSummary = { totalDueThisMonth, totalPaidThisMonth, byType, cashSum, bankSum, phonepeSum, discountSum, grandCollected };
 
   resultArea.innerHTML = `
     <h4>Due Status for ${MONTH_NAMES[mm-1]} ${yy}</h4>
@@ -580,8 +758,21 @@ function getFilteredMonthwiseRows() {
 function exportMonthwiseExcel() {
   if (!lastMonthwiseMeta) { showToast("Generate a report first.", "error"); return; }
   const rows = getFilteredMonthwiseRows();
-  if (!rows.length) { showToast("No rows match the current filter.", "error"); return; }
   const { yy, mm } = lastMonthwiseMeta;
+  const filterSelect = document.getElementById("mStatusFilter");
+  const filterLabel = filterSelect.options[filterSelect.selectedIndex].text;
+  const summary = [
+    ["Month-wise Due & Collection Report", `${MONTH_NAMES[mm-1]} ${yy}`],
+    ["Status Filter", filterLabel],
+    ["Due this month", lastMonthwiseSummary.totalDueThisMonth],
+    ["Paid for this month", lastMonthwiseSummary.totalPaidThisMonth],
+    ["Monthly collected", lastMonthwiseSummary.byType.monthly],
+    ["Admission/Readmission collected", lastMonthwiseSummary.byType.admission_readmission],
+    ["Other collected", lastMonthwiseSummary.byType.other],
+    ["Total collected", lastMonthwiseSummary.grandCollected],
+    ["Cash", lastMonthwiseSummary.cashSum], ["Bank", lastMonthwiseSummary.bankSum],
+    ["PhonePe", lastMonthwiseSummary.phonepeSum], ["Discount", lastMonthwiseSummary.discountSum]
+  ];
   const aoa = [["Reg No","Name","Class","Status","Amount Due"]];
   rows.forEach(r=>{
     aoa.push([
@@ -590,16 +781,15 @@ function exportMonthwiseExcel() {
       r.status==="paid"?0:Number(r.due)
     ]);
   });
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Month-wise Due");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), "Summary");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "Due Status");
   XLSX.writeFile(wb, `monthwise_due_${MONTH_NAMES[mm-1]}_${yy}.xlsx`);
 }
 
 function exportMonthwisePDF() {
   if (!lastMonthwiseMeta) { showToast("Generate a report first.", "error"); return; }
   const rows = getFilteredMonthwiseRows();
-  if (!rows.length) { showToast("No rows match the current filter.", "error"); return; }
   const { yy, mm } = lastMonthwiseMeta;
   const filterSelect = document.getElementById("mStatusFilter");
   const filterLabel = filterSelect.options[filterSelect.selectedIndex].text;
@@ -612,12 +802,27 @@ function exportMonthwisePDF() {
   doc.text(`Filter: ${filterLabel}`, 14, 22);
   doc.autoTable({
     startY: 28,
+    head: [["Collection / Due Summary","Amount"]],
+    body: [
+      ["Due this month",money(lastMonthwiseSummary.totalDueThisMonth)],
+      ["Paid for this month",money(lastMonthwiseSummary.totalPaidThisMonth)],
+      ["Monthly collected",money(lastMonthwiseSummary.byType.monthly)],
+      ["Admission/Readmission collected",money(lastMonthwiseSummary.byType.admission_readmission)],
+      ["Other collected",money(lastMonthwiseSummary.byType.other)],
+      ["Total collected",money(lastMonthwiseSummary.grandCollected)],
+      ["Cash / Bank / PhonePe / Discount",`${money(lastMonthwiseSummary.cashSum)} / ${money(lastMonthwiseSummary.bankSum)} / ${money(lastMonthwiseSummary.phonepeSum)} / ${money(lastMonthwiseSummary.discountSum)}`]
+    ],
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [176,141,87] }
+  });
+  doc.autoTable({
+    startY: doc.lastAutoTable.finalY+8,
     head: [["Reg No","Name","Class","Status","Amount Due"]],
-    body: rows.map(r=>[
+    body: rows.length ? rows.map(r=>[
       r.s.reg_no, r.s.name, CLASS_LABELS[r.s.class]||r.s.class,
       r.status==="paid"?"Paid":r.status==="partial"?"Partial":"Due",
       r.status==="paid"?"—":money(r.due)
-    ]),
+    ]) : [["—","No students match this filter","","",""]],
     styles: { fontSize: 9 },
     headStyles: { fillColor: [176,141,87] }
   });
@@ -643,6 +848,8 @@ async function generateDateRange() {
   const klass = document.getElementById("dClass").value;
   const resultArea = document.getElementById("dResultArea");
   if (!start || !end) { showToast("Pick both dates.", "error"); return; }
+  lastDateRangeRows = [];
+  lastDateRangeMeta = null;
   resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
 
   // Filter by Fee Receive Date (not the entry/recorded timestamp)
@@ -673,6 +880,7 @@ async function generateDateRange() {
     student_session: r.target_session || (r.student_master && r.student_master.academic_session) || "",
     category_name: r.fee_type==="other" ? (categories.find(c=>c.category_id===r.category_id)?.name || "") : ""
   }));
+  lastDateRangeMeta = { start, end, feeType, klass };
 
   const totals = lastDateRangeRows.reduce((acc,r)=>{
     acc.cash += Number(r.amount_cash); acc.bank += Number(r.amount_bank);
@@ -705,19 +913,66 @@ async function generateDateRange() {
 }
 
 function exportDateRange() {
-  if (!lastDateRangeRows.length) { showToast("Generate a report first.", "error"); return; }
+  if (!lastDateRangeMeta) { showToast("Generate a report first.", "error"); return; }
+  const { start, end, feeType, klass } = lastDateRangeMeta;
+  const totals = getDateRangeTotals();
   const aoa = [["Date","Reg No","Name","Class","Session","Type","Detail","Cash","Bank","PhonePe","Discount","Remark"]];
   lastDateRangeRows.forEach(r=>{
     const detail = r.fee_type==="monthly" ? (r.for_months||[]).join(", ") : r.fee_type==="other" ? r.category_name : "";
     aoa.push([
       receivedDateLabel(r), r.student_reg_no, r.student_name, CLASS_LABELS[r.student_class]||r.student_class, r.student_session,
-      r.fee_type, detail, r.amount_cash, r.amount_bank, r.amount_phonepe, r.discount, r.remark||""
+      receiptTypeLabel(r), detail, Number(r.amount_cash||0), Number(r.amount_bank||0), Number(r.amount_phonepe||0), Number(r.discount||0), r.remark||""
     ]);
   });
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Report");
-  XLSX.writeFile(wb, `fee_collection_${document.getElementById("dStart").value}_to_${document.getElementById("dEnd").value}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Date Range Collection Report"], ["From",start], ["To",end],
+    ["Fee Type",feeType||"All types"], ["Class",klass ? (CLASS_LABELS[klass]||klass) : "All classes"],
+    ["Receipts",lastDateRangeRows.length], ["Total Collected",totals.grand],
+    ["Cash",totals.cash], ["Bank",totals.bank], ["PhonePe",totals.phonepe], ["Discount",totals.discount]
+  ]), "Summary");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "Receipts");
+  XLSX.writeFile(wb, `fee_collection_${start}_to_${end}.xlsx`);
+}
+
+function getDateRangeTotals() {
+  const totals = lastDateRangeRows.reduce((acc,r)=>{
+    acc.cash += Number(r.amount_cash||0); acc.bank += Number(r.amount_bank||0);
+    acc.phonepe += Number(r.amount_phonepe||0); acc.discount += Number(r.discount||0);
+    return acc;
+  }, {cash:0,bank:0,phonepe:0,discount:0});
+  totals.grand = totals.cash+totals.bank+totals.phonepe+totals.discount;
+  return totals;
+}
+
+function exportDateRangePDF() {
+  if (!lastDateRangeMeta) { showToast("Generate a report first.", "error"); return; }
+  const { start, end, feeType, klass } = lastDateRangeMeta;
+  const totals = getDateRangeTotals();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({orientation:"landscape"});
+  doc.setFontSize(14);
+  doc.text("Date Range Collection Report", 14, 16);
+  doc.setFontSize(10);
+  doc.text(`From ${start} to ${end} | ${feeType||"All types"} | ${klass ? (CLASS_LABELS[klass]||klass) : "All classes"}`, 14, 22);
+  doc.autoTable({
+    startY:28,
+    head:[["Receipts","Total Collected","Cash","Bank","PhonePe","Discount"]],
+    body:[[String(lastDateRangeRows.length),money(totals.grand),money(totals.cash),money(totals.bank),money(totals.phonepe),money(totals.discount)]],
+    styles:{fontSize:8}, headStyles:{fillColor:[176,141,87]}
+  });
+  doc.autoTable({
+    startY:doc.lastAutoTable.finalY+8,
+    head:[["Date","Reg No","Name","Class","Session","Type","Detail","Cash","Bank","PhonePe","Discount","Remark"]],
+    body:lastDateRangeRows.length ? lastDateRangeRows.map(r=>[
+      receivedDateLabel(r),r.student_reg_no,r.student_name,CLASS_LABELS[r.student_class]||r.student_class,
+      r.student_session,receiptTypeLabel(r),
+      r.fee_type==="monthly" ? (r.for_months||[]).join(", ") : r.fee_type==="other" ? r.category_name : "—",
+      money(r.amount_cash),money(r.amount_bank),money(r.amount_phonepe),money(r.discount),r.remark||""
+    ]) : [["—","No receipts in this range","","","","","","","","","",""]],
+    styles:{fontSize:7}, headStyles:{fillColor:[176,141,87]}
+  });
+  doc.save(`fee_collection_${start}_to_${end}.pdf`);
 }
 
 init();
