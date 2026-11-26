@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Result Admin — Golden Heritage Academy Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .ra-tabs { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+  .ra-tab-btn { padding: 8px 16px; border-radius: var(--radius-md, 8px); border: 1px solid var(--ink, #ccc);
+                background: transparent; cursor: pointer; font-weight: 600; }
+  .ra-tab-btn.active { background: var(--brass, #4CAF50); color: #fff; border-color: transparent; }
+  .ra-section { display: none; }
+  .ra-section.show { display: block; }
+  .ra-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+  .ra-row .field { min-width: 180px; margin-bottom: 0; }
+  .ra-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .ra-grid { grid-template-columns: 1fr; } }
+  table.data input.input, table.data select.input { padding: 6px 8px; min-width: 70px; }
+  table.data input[type=number] { width: 90px; }
+  .ra-img-box { border: 1px dashed #aaa; border-radius: 8px; padding: 12px; text-align: center; }
+  .ra-img-box img { max-height: 110px; max-width: 100%; display: block; margin: 0 auto 8px; background: #f5f5f5; }
+  .ra-muted { opacity: .7; font-size: 13px; }
+  .ra-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .ra-pill.ok { background: #dcfce7; color: #166534; }
+  .ra-pill.warn { background: #fef3c7; color: #92400e; }
+  .ra-pill.off { background: #e5e7eb; color: #374151; }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Academics</span>
+    <h1>Result Admin</h1>
+    <p>Create exams, set up subjects and full marks, allot teachers, unlock marks and manage the mark sheet branding.</p>
+  </div>
+
+  <div class="ra-tabs">
+    <button class="ra-tab-btn active" data-tab="setup">📝 Exams &amp; Subject Setup</button>
+    <button class="ra-tab-btn" data-tab="alloc">👩‍🏫 Teacher Allotment</button>
+    <button class="ra-tab-btn" data-tab="unlock">🔓 Submission &amp; Unlock</button>
+    <button class="ra-tab-btn" data-tab="brand">🏫 School, Logos &amp; Signature</button>
+  </div>
+
+  <!-- ================= EXAMS & SUBJECT SETUP ================= -->
+  <section id="tab-setup" class="ra-section show">
+    <div class="card" style="margin-bottom:16px;">
+      <h3>Exam</h3>
+      <div class="ra-row">
+        <div class="field" style="min-width:300px;">
+          <label for="exSelect">Select exam</label>
+          <select class="input" id="exSelect"></select>
+        </div>
+        <button class="btn btn-ghost" id="exNewBtn">➕ New exam</button>
+        <button class="btn btn-ghost" id="exEditBtn">✏️ Edit exam</button>
+        <button class="btn btn-danger" id="exDelBtn" data-perm="delete">🗑 Delete exam</button>
+      </div>
+
+      <div id="exForm" style="display:none; border-top:1px solid rgba(0,0,0,.1); padding-top:14px;">
+        <h4 id="exFormTitle">New exam</h4>
+        <div class="ra-grid">
+          <div class="field"><label for="exName">Exam name *</label>
+            <input class="input" id="exName" placeholder="2ND TERM EXAMINATION 2026" /></div>
+          <div class="field"><label for="exSession">Academic session</label>
+            <input class="input" id="exSession" placeholder="2026" /></div>
+          <div class="field"><label for="exPublish">Publish date</label>
+            <input class="input" type="date" id="exPublish" /></div>
+          <div class="field" id="exCopyWrap"><label for="exCopyFrom">Copy subject setup from (all classes)</label>
+            <select class="input" id="exCopyFrom"></select>
+            <small>Reuses an old exam's full marks, oral and exclude settings. You can still edit afterwards.</small></div>
+        </div>
+        <button class="btn btn-primary" id="exSaveBtn">Save exam</button>
+        <button class="btn btn-ghost" id="exCancelBtn">Cancel</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Class-wise subject setup</h3>
+      <div class="ra-row">
+        <div class="field"><label for="suClass">Class</label>
+          <select class="input" id="suClass"></select></div>
+        <div class="field"><label for="suCopyExam">Copy this class from another exam</label>
+          <select class="input" id="suCopyExam"></select></div>
+        <button class="btn btn-ghost" id="suCopyBtn">Copy into this class</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr>
+            <th>#</th><th>Subject name</th><th>Written full</th><th>Has oral?</th><th>Oral full</th>
+            <th>Total full</th><th>Exclude from grand total</th><th></th>
+          </tr></thead>
+          <tbody id="suBody"></tbody>
+        </table>
+      </div>
+      <div class="ra-row" style="margin-top:12px;">
+        <button class="btn btn-ghost" id="suAddBtn">+ Add subject</button>
+        <button class="btn btn-primary" id="suSaveBtn" data-perm="edit">💾 Save subject setup</button>
+      </div>
+      <p class="ra-muted">Excluded subjects (like Physical Education) are shown on the mark sheet but never count in Total, Grand Total or Percentage.</p>
+    </div>
+  </section>
+
+  <!-- ================= TEACHER ALLOTMENT ================= -->
+  <section id="tab-alloc" class="ra-section card">
+    <h3>Teacher allotment</h3>
+    <p class="ra-muted">Allotments stay the same for every exam. Teachers only see the class and subjects allotted to them in Mark Entry. Changes save immediately.</p>
+    <div class="ra-row">
+      <div class="field"><label for="alClass">Class</label>
+        <select class="input" id="alClass"></select></div>
+    </div>
+    <div id="alTable"></div>
+    <hr style="margin:22px 0; opacity:.3;" />
+    <h4>Teacher-wise summary</h4>
+    <div id="alSummary"></div>
+  </section>
+
+  <!-- ================= SUBMISSION & UNLOCK ================= -->
+  <section id="tab-unlock" class="ra-section card">
+    <h3>Submission status &amp; unlock</h3>
+    <div class="ra-row">
+      <div class="field" style="min-width:300px;"><label for="ulExam">Exam</label>
+        <select class="input" id="ulExam"></select></div>
+      <div class="field"><label for="ulClass">Class</label>
+        <select class="input" id="ulClass"></select></div>
+    </div>
+    <div id="ulStatus"></div>
+    <div id="ulDetail" style="margin-top:18px;"></div>
+  </section>
+
+  <!-- ================= BRANDING ================= -->
+  <section id="tab-brand" class="ra-section card">
+    <h3>School details, logos &amp; signature</h3>
+    <p class="ra-muted">Saved once and used on every mark sheet of every exam. Anything you do not change stays as it is.</p>
+    <div class="ra-grid">
+      <div class="field"><label for="bSchool">School name</label><input class="input" id="bSchool" /></div>
+      <div class="field"><label for="bRegd">Regd. No</label><input class="input" id="bRegd" /></div>
+      <div class="field" style="grid-column:1/-1;"><label for="bAddr">Address</label><input class="input" id="bAddr" /></div>
+      <div class="field"><label for="bRule">Result (Pass / Fail) rule</label>
+        <select class="input" id="bRule">
+          <option value="all_pass">All students Pass (no condition)</option>
+          <option value="fail_any_d">Fail if any counted subject is grade D</option>
+          <option value="fail_below_pct">Fail if overall percentage is below cut-off</option>
+        </select></div>
+      <div class="field"><label for="bCutoff">Percentage cut-off</label>
+        <input class="input" type="number" min="0" max="100" step="0.1" id="bCutoff" /></div>
+    </div>
+
+    <div class="ra-grid" style="grid-template-columns:repeat(3,1fr); margin-top:10px;">
+      <div class="ra-img-box"><b>Board logo</b><div id="pvBoard" class="ra-muted">Not set</div>
+        <input type="file" accept="image/*" id="fBoard" /></div>
+      <div class="ra-img-box"><b>School logo</b><div id="pvSchool" class="ra-muted">Not set</div>
+        <input type="file" accept="image/*" id="fSchool" /></div>
+      <div class="ra-img-box"><b>Headmaster signature</b><div id="pvSign" class="ra-muted">Not set</div>
+        <input type="file" accept="image/*" id="fSign" /></div>
+    </div>
+    <div class="ra-row" style="margin-top:16px;">
+      <button class="btn btn-primary" id="bSaveBtn" data-perm="edit">💾 Save</button>
+      <button class="btn btn-ghost" id="bClearBoard">Remove board logo</button>
+      <button class="btn btn-ghost" id="bClearSchool">Remove school logo</button>
+      <button class="btn btn-ghost" id="bClearSign">Remove signature</button>
+    </div>
+  </section>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "result-admin";
+let myAccess = null;
+
+const CLASS_LABELS = {
+  "1":"Class 1","2":"Class 2","3":"Class 3","4":"Class 4","5":"Class 5","6":"Class 6","7":"Class 7",
+  "8":"Class 8","9":"Class 9","10":"Class 10","11-arts":"Class 11 - Arts","11-science":"Class 11 - Science",
+  "12-arts":"Class 12 - Arts","12-science":"Class 12 - Science"
+};
+const sb = () => supabaseClient;
+const uid = () => String(myAccess.profile.user_id);
+const $ = id => document.getElementById(id);
+
+let exams = [], teachers = [], settings = null;
+let editingExamId = null;
+let setupRows = [];          // working copy of the subject table
+const pendingImg = { board_logo: undefined, school_logo: undefined, hm_sign: undefined }; // undefined = unchanged, null = remove
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  document.querySelectorAll(".ra-tab-btn").forEach(btn => btn.addEventListener("click", () => {
+    document.querySelectorAll(".ra-tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".ra-section").forEach(s => s.classList.remove("show"));
+    btn.classList.add("active");
+    $("tab-" + btn.dataset.tab).classList.add("show");
+    if (btn.dataset.tab === "alloc") loadAlloc();
+    if (btn.dataset.tab === "unlock") loadStatus();
+  }));
+
+  const classOpts = Object.entries(CLASS_LABELS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  ["suClass", "alClass", "ulClass"].forEach(id => $(id).innerHTML = classOpts);
+
+  $("exSelect").addEventListener("change", loadSetup);
+  $("suClass").addEventListener("change", loadSetup);
+  $("exNewBtn").addEventListener("click", () => openExamForm(null));
+  $("exEditBtn").addEventListener("click", () => openExamForm($("exSelect").value));
+  $("exCancelBtn").addEventListener("click", () => $("exForm").style.display = "none");
+  $("exSaveBtn").addEventListener("click", saveExam);
+  $("exDelBtn").addEventListener("click", deleteExam);
+  $("suAddBtn").addEventListener("click", addSubjectRow);
+  $("suSaveBtn").addEventListener("click", saveSetup);
+  $("suCopyBtn").addEventListener("click", copyClassFromExam);
+  $("alClass").addEventListener("change", loadAlloc);
+  $("ulExam").addEventListener("change", loadStatus);
+  $("ulClass").addEventListener("change", loadStatus);
+
+  [["fBoard","board_logo","pvBoard",400],["fSchool","school_logo","pvSchool",400],["fSign","hm_sign","pvSign",500]].forEach(([inp, key, pv, max]) => {
+    $(inp).addEventListener("change", async e => {
+      const f = e.target.files[0]; if (!f) return;
+      try { pendingImg[key] = await fileToDataUrl(f, max); showPreview(pv, pendingImg[key]); }
+      catch { showToast("Could not read that image.", "error"); }
+    });
+  });
+  [["bClearBoard","board_logo","pvBoard","fBoard"],["bClearSchool","school_logo","pvSchool","fSchool"],["bClearSign","hm_sign","pvSign","fSign"]]
+    .forEach(([btn, key, pv, inp]) => $(btn).addEventListener("click", () => { pendingImg[key] = null; $(inp).value = ""; showPreview(pv, null); }));
+  $("bSaveBtn").addEventListener("click", saveBranding);
+
+  await Promise.all([loadExams(), loadTeachers(), loadBranding()]);
+  await loadSetup();
+}
+
+/* ---------------------------------------------------------------- EXAMS */
+async function loadExams(selectId) {
+  const { data, error } = await sb().from("result_exams").select("*").order("created_at", { ascending: false });
+  if (error) { showToast(error.message, "error"); return; }
+  exams = data || [];
+  const opts = exams.map(e => `<option value="${e.id}">${escapeHtml(e.name)}${e.academic_session ? " (" + escapeHtml(e.academic_session) + ")" : ""}</option>`).join("");
+  const none = '<option value="">— none —</option>';
+  const keep = selectId || $("exSelect").value;
+  $("exSelect").innerHTML = exams.length ? opts : '<option value="">No exams yet — create one</option>';
+  if (keep && exams.some(e => e.id === keep)) $("exSelect").value = keep;
+  $("exCopyFrom").innerHTML = none + opts;
+  $("suCopyExam").innerHTML = none + opts;
+  $("ulExam").innerHTML = exams.length ? opts : '<option value="">No exams</option>';
+}
+
+function openExamForm(id) {
+  editingExamId = id || null;
+  const e = id ? exams.find(x => x.id === id) : null;
+  if (id && !e) { showToast("Select an exam first.", "error"); return; }
+  $("exFormTitle").textContent = e ? "Edit exam" : "New exam";
+  $("exName").value = e ? e.name : "";
+  $("exSession").value = e ? (e.academic_session || "") : String(new Date().getFullYear());
+  $("exPublish").value = e ? (e.publish_date || "") : "";
+  $("exCopyWrap").style.display = e ? "none" : "";
+  $("exCopyFrom").value = "";
+  $("exForm").style.display = "block";
+}
+
+async function saveExam() {
+  const name = $("exName").value.trim();
+  if (!name) { showToast("Enter the exam name.", "error"); return; }
+  const row = { name, academic_session: $("exSession").value.trim() || null, publish_date: $("exPublish").value || null };
+  if (editingExamId) {
+    const { error } = await sb().from("result_exams").update(row).eq("id", editingExamId);
+    if (error) { showToast(error.message, "error"); return; }
+    showToast("Exam updated.", "success");
+    $("exForm").style.display = "none";
+    await loadExams(editingExamId);
+    return;
+  }
+  row.created_by = uid();
+  const { data, error } = await sb().from("result_exams").insert(row).select().single();
+  if (error) { showToast(error.message.includes("duplicate") ? "An exam with this name already exists." : error.message, "error"); return; }
+
+  const src = $("exCopyFrom").value;
+  if (src) {
+    const { data: old, error: e2 } = await sb().from("result_subject_setup").select("*").eq("exam_id", src);
+    if (e2) { showToast(e2.message, "error"); }
+    else if (old.length) {
+      const copy = old.map(({ id, exam_id, ...rest }) => ({ ...rest, exam_id: data.id }));
+      const { error: e3 } = await sb().from("result_subject_setup").insert(copy);
+      if (e3) showToast("Exam created but copying setup failed: " + e3.message, "error");
+    }
+  }
+  showToast("Exam created.", "success");
+  $("exForm").style.display = "none";
+  await loadExams(data.id);
+  await loadSetup();
+}
+
+async function deleteExam() {
+  const id = $("exSelect").value; if (!id) return;
+  const e = exams.find(x => x.id === id);
+  if (!confirm(`Delete "${e.name}"?\n\nThis permanently deletes its subject setup AND all marks entered for it.`)) return;
+  if (prompt('Type DELETE to confirm') !== "DELETE") return;
+  const { error } = await sb().from("result_exams").delete().eq("id", id);
+  if (error) { showToast(error.message, "error"); return; }
+  showToast("Exam deleted.", "success");
+  await loadExams(); await loadSetup();
+}
+
+/* ------------------------------------------------------- SUBJECT SETUP */
+async function loadSetup() {
+  const examId = $("exSelect").value, klass = $("suClass").value;
+  if (!examId) { setupRows = []; renderSetup(); return; }
+  const { data, error } = await sb().from("result_subject_setup").select("*")
+    .eq("exam_id", examId).eq("class", klass).order("sort_order");
+  if (error) { showToast(error.message, "error"); return; }
+  setupRows = (data || []).map(r => ({
+    orig: r.subject_name, name: r.subject_name, written: r.written_full, has_oral: r.has_oral,
+    oral: r.has_oral ? r.oral_full : 20, exclude: r.exclude_from_total
+  }));
+  renderSetup();
+}
+
+function renderSetup() {
+  const body = $("suBody");
+  if (!setupRows.length) { body.innerHTML = `<tr><td colspan="8" class="ra-muted">No subjects for this class yet. Add one, or copy from another exam.</td></tr>`; return; }
+  body.innerHTML = setupRows.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td><input class="input" data-i="${i}" data-f="name" value="${escapeHtml(r.name)}" /></td>
+      <td><input class="input" type="number" min="1" data-i="${i}" data-f="written" value="${r.written}" /></td>
+      <td><input type="checkbox" data-i="${i}" data-f="has_oral" ${r.has_oral ? "checked" : ""} /></td>
+      <td><input class="input" type="number" min="1" data-i="${i}" data-f="oral" value="${r.has_oral ? r.oral : ""}" ${r.has_oral ? "" : "disabled"} placeholder="NA" /></td>
+      <td id="suTot${i}"><b>${totalFull(r)}</b></td>
+      <td><input type="checkbox" data-i="${i}" data-f="exclude" ${r.exclude ? "checked" : ""} /></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" data-act="up" data-i="${i}">↑</button>
+        <button class="btn btn-ghost btn-sm" data-act="down" data-i="${i}">↓</button>
+        <button class="btn btn-danger btn-sm" data-act="del" data-i="${i}">✕</button>
+      </td>
+    </tr>`).join("");
+
+  // Update state in place — never re-render on keystroke (keeps cursor focus)
+  body.querySelectorAll("[data-f]").forEach(el => {
+    const ev = el.type === "checkbox" ? "change" : "input";
+    el.addEventListener(ev, () => {
+      const i = +el.dataset.i, f = el.dataset.f;
+      if (el.type === "checkbox") setupRows[i][f] = el.checked; else setupRows[i][f] = el.value;
+      if (f === "has_oral") { renderSetup(); return; }
+      const cell = $("suTot" + i); if (cell) cell.innerHTML = `<b>${totalFull(setupRows[i])}</b>`;
+    });
+  });
+  body.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
+    const i = +b.dataset.i, a = b.dataset.act;
+    if (a === "del") setupRows.splice(i, 1);
+    if (a === "up" && i > 0) [setupRows[i - 1], setupRows[i]] = [setupRows[i], setupRows[i - 1]];
+    if (a === "down" && i < setupRows.length - 1) [setupRows[i + 1], setupRows[i]] = [setupRows[i], setupRows[i + 1]];
+    renderSetup();
+  }));
+}
+function totalFull(r) { return (Number(r.written) || 0) + (r.has_oral ? (Number(r.oral) || 0) : 0); }
+
+function addSubjectRow() {
+  setupRows.push({ orig: null, name: "", written: 80, has_oral: true, oral: 20, exclude: false });
+  renderSetup();
+  const inputs = $("suBody").querySelectorAll('[data-f="name"]'); inputs[inputs.length - 1]?.focus();
+}
+
+async function saveSetup() {
+  const examId = $("exSelect").value, klass = $("suClass").value;
+  if (!examId) { showToast("Create or select an exam first.", "error"); return; }
+  if (!setupRows.length) { showToast("Add at least one subject.", "error"); return; }
+  const names = new Set();
+  for (const [i, r] of setupRows.entries()) {
+    const n = r.name.trim();
+    if (!n) { showToast(`Row ${i + 1}: subject name is empty.`, "error"); return; }
+    if (names.has(n.toLowerCase())) { showToast(`"${n}" appears twice.`, "error"); return; }
+    names.add(n.toLowerCase());
+    if (!(Number(r.written) > 0)) { showToast(`${n}: written full mark must be above 0.`, "error"); return; }
+    if (r.has_oral && !(Number(r.oral) > 0)) { showToast(`${n}: oral full mark must be above 0.`, "error"); return; }
+    r.name = n;
+  }
+
+  // existing rows in DB for this exam+class
+  const { data: existing } = await sb().from("result_subject_setup").select("subject_name").eq("exam_id", examId).eq("class", klass);
+  const existingNames = (existing || []).map(x => x.subject_name);
+
+  // 1) renames — carry marks across so nothing is orphaned
+  for (const r of setupRows) {
+    if (r.orig && r.orig !== r.name && existingNames.includes(r.orig)) {
+      let q = await sb().from("result_subject_setup").update({ subject_name: r.name }).eq("exam_id", examId).eq("class", klass).eq("subject_name", r.orig);
+      if (q.error) { showToast(q.error.message, "error"); return; }
+      q = await sb().from("result_marks").update({ subject_name: r.name }).eq("exam_id", examId).eq("class", klass).eq("subject_name", r.orig);
+      if (q.error) { showToast(q.error.message, "error"); return; }
+      existingNames[existingNames.indexOf(r.orig)] = r.name;
+    }
+  }
+  // 2) removals
+  const keep = setupRows.map(r => r.name);
+  const removed = existingNames.filter(n => !keep.includes(n));
+  if (removed.length) {
+    if (!confirm(`Removing: ${removed.join(", ")}\n\nAny marks already entered for these subjects in this exam will be deleted. Continue?`)) return;
+    for (const n of removed) {
+      await sb().from("result_marks").delete().eq("exam_id", examId).eq("class", klass).eq("subject_name", n);
+      await sb().from("result_subject_setup").delete().eq("exam_id", examId).eq("class", klass).eq("subject_name", n);
+    }
+  }
+  // 3) upsert
+  const payload = setupRows.map((r, i) => ({
+    exam_id: examId, class: klass, subject_name: r.name, written_full: Number(r.written),
+    has_oral: r.has_oral, oral_full: r.has_oral ? Number(r.oral) : 0,
+    exclude_from_total: !!r.exclude || /physical/i.test(r.name), sort_order: i
+  }));
+  const { error } = await sb().from("result_subject_setup").upsert(payload, { onConflict: "exam_id,class,subject_name" });
+  if (error) { showToast(error.message, "error"); return; }
+  showToast("Subject setup saved.", "success");
+  await loadSetup();
+}
+
+async function copyClassFromExam() {
+  const src = $("suCopyExam").value, examId = $("exSelect").value, klass = $("suClass").value;
+  if (!src || !examId) { showToast("Choose the exam to copy from.", "error"); return; }
+  const { data, error } = await sb().from("result_subject_setup").select("*").eq("exam_id", src).eq("class", klass).order("sort_order");
+  if (error) { showToast(error.message, "error"); return; }
+  if (!data.length) { showToast("That exam has no setup for this class.", "error"); return; }
+  setupRows = data.map(r => ({ orig: null, name: r.subject_name, written: r.written_full, has_oral: r.has_oral,
+    oral: r.has_oral ? r.oral_full : 20, exclude: r.exclude_from_total }));
+  // keep 'orig' for subjects that already exist in the target so Save doesn't treat them as new
+  const { data: ex } = await sb().from("result_subject_setup").select("subject_name").eq("exam_id", examId).eq("class", klass);
+  const have = new Set((ex || []).map(x => x.subject_name));
+  setupRows.forEach(r => { if (have.has(r.name)) r.orig = r.name; });
+  renderSetup();
+  showToast("Copied. Review and press Save subject setup.", "success");
+}
+
+/* ------------------------------------------------- TEACHER ALLOTMENT */
+async function loadTeachers() {
+  const { data, error } = await sb()
+    .from("users")
+    .select("user_id, username, status, roles(role_name)");
+  if (error) {
+    console.error("users load failed", error);
+    showToast("Could not load users: " + error.message, "error");
+    teachers = [];
+    return;
+  }
+  const list = (data || [])
+    .filter(x => !x.status || /^active$/i.test(String(x.status)))
+    .map(x => ({
+      user_id: x.user_id,
+      username: x.username || String(x.user_id),
+      role: x.roles ? String(x.roles.role_name || "") : ""
+    }));
+  teachers = list.filter(x => /teacher/i.test(x.role));
+  if (!teachers.length) {
+    console.warn("No active user matched role 'teacher'.");
+    showToast("No active users have the Teacher role. Check the user role assignments.", "error");
+  }
+}
+
+async function loadAlloc() {
+  const klass = $("alClass").value;
+  const [{ data: subs }, { data: allocs }] = await Promise.all([
+    sb().from("result_subject_setup").select("subject_name, sort_order").eq("class", klass).order("sort_order"),
+    sb().from("result_teacher_alloc").select("*")
+  ]);
+  const seen = [];
+  (subs || []).forEach(s => { if (!seen.includes(s.subject_name)) seen.push(s.subject_name); });
+  const byKey = {}; (allocs || []).forEach(a => byKey[a.class + "|" + a.subject_name] = a);
+
+  if (!seen.length) $("alTable").innerHTML = `<div class="empty-state"><div class="icon">📚</div><p>No subjects set up for this class yet. Use Exams &amp; Subject Setup first.</p></div>`;
+  else {
+    const tOpts = t => `<option value="">— not allotted —</option>` + teachers.map(x =>
+      `<option value="${escapeHtml(String(x.user_id))}" ${t === String(x.user_id) ? "selected" : ""}>${escapeHtml(x.username)}</option>`).join("");
+    $("alTable").innerHTML = `<div class="table-wrap"><table class="data"><thead><tr><th>Subject</th><th>Teacher</th></tr></thead><tbody>` +
+      seen.map((s, i) => `<tr><td>${escapeHtml(s)}</td><td><select class="input" data-subj="${i}">${tOpts(byKey[klass + "|" + s]?.teacher_id)}</select></td></tr>`).join("") +
+      `</tbody></table></div>`;
+    $("alTable").querySelectorAll("select").forEach(sel => sel.addEventListener("change", async () => {
+      const subject = seen[+sel.dataset.subj], tid = sel.value;
+      if (!tid) {
+        const { error } = await sb().from("result_teacher_alloc").delete().eq("class", klass).eq("subject_name", subject);
+        if (error) showToast(error.message, "error"); else { showToast("Allotment removed.", "success"); loadAlloc(); }
+        return;
+      }
+      const t = teachers.find(x => String(x.user_id) === tid);
+      const { error } = await sb().from("result_teacher_alloc").upsert(
+        { class: klass, subject_name: subject, teacher_id: tid, teacher_name: t?.username || null }, { onConflict: "class,subject_name" });
+      if (error) showToast(error.message, "error"); else { showToast("Allotted to " + (t?.username || ""), "success"); renderSummary(); }
+    }));
+  }
+  renderSummary();
+}
+
+async function renderSummary() {
+  const { data } = await sb().from("result_teacher_alloc").select("*").order("teacher_name");
+  if (!data || !data.length) { $("alSummary").innerHTML = `<p class="ra-muted">Nothing allotted yet.</p>`; return; }
+  const g = {};
+  data.forEach(a => (g[a.teacher_name || a.teacher_id] ||= []).push(a));
+  $("alSummary").innerHTML = `<div class="table-wrap"><table class="data"><thead><tr><th>Teacher</th><th>Class &amp; subjects</th></tr></thead><tbody>` +
+    Object.entries(g).map(([t, rows]) => {
+      const byClass = {}; rows.forEach(r => (byClass[r.class] ||= []).push(r.subject_name));
+      return `<tr><td><b>${escapeHtml(t)}</b></td><td>${Object.entries(byClass).map(([c, s]) =>
+        `<div><b>${escapeHtml(CLASS_LABELS[c] || c)}:</b> ${s.map(escapeHtml).join(", ")}</div>`).join("")}</td></tr>`;
+    }).join("") + `</tbody></table></div>`;
+}
+
+/* --------------------------------------------- SUBMISSION & UNLOCK */
+async function loadStatus() {
+  const examId = $("ulExam").value, klass = $("ulClass").value;
+  $("ulDetail").innerHTML = "";
+  if (!examId) { $("ulStatus").innerHTML = ""; return; }
+  $("ulStatus").innerHTML = '<div class="skeleton" style="height:18px"></div>';
+  const [subs, stu, marks, allocs] = await Promise.all([
+    sb().from("result_subject_setup").select("*").eq("exam_id", examId).eq("class", klass).order("sort_order"),
+    sb().from("student_master").select("reg_no", { count: "exact" }).eq("class", klass).eq("status", "active"),
+    sb().from("result_marks").select("subject_name, unlocked").eq("exam_id", examId).eq("class", klass),
+    sb().from("result_teacher_alloc").select("*").eq("class", klass)
+  ]);
+  const total = stu.data?.length || 0;
+  if (!subs.data?.length) { $("ulStatus").innerHTML = `<p class="ra-muted">No subject setup for this class in this exam.</p>`; return; }
+  const cnt = {}, unl = {};
+  (marks.data || []).forEach(m => { cnt[m.subject_name] = (cnt[m.subject_name] || 0) + 1; if (m.unlocked) unl[m.subject_name] = (unl[m.subject_name] || 0) + 1; });
+  const teacherOf = {}; (allocs.data || []).forEach(a => teacherOf[a.subject_name] = a.teacher_name);
+
+  $("ulStatus").innerHTML = `<div class="table-wrap"><table class="data"><thead><tr>
+    <th>Subject</th><th>Teacher</th><th>Submitted</th><th>Status</th><th></th></tr></thead><tbody>` +
+    subs.data.map((s, i) => {
+      const c = cnt[s.subject_name] || 0, u = unl[s.subject_name] || 0;
+      const pill = c === 0 ? '<span class="ra-pill off">Not started</span>'
+        : (u ? `<span class="ra-pill warn">${u} unlocked</span>` : (c >= total ? '<span class="ra-pill ok">Complete &amp; locked</span>' : '<span class="ra-pill warn">Partial</span>'));
+      return `<tr><td>${escapeHtml(s.subject_name)}</td><td>${escapeHtml(teacherOf[s.subject_name] || "— not allotted —")}</td>
+        <td>${c} / ${total}</td><td>${pill}</td>
+        <td><button class="btn btn-ghost btn-sm" data-subj="${i}">Manage</button></td></tr>`;
+    }).join("") + `</tbody></table></div>`;
+  $("ulStatus").querySelectorAll("[data-subj]").forEach(b => b.addEventListener("click", () => openDetail(subs.data[+b.dataset.subj])));
+}
+
+async function openDetail(subj) {
+  const examId = $("ulExam").value, klass = $("ulClass").value;
+  const [stu, marks] = await Promise.all([
+    sb().from("student_master").select("reg_no, name, roll_no, section").eq("class", klass).eq("status", "active"),
+    sb().from("result_marks").select("*").eq("exam_id", examId).eq("class", klass).eq("subject_name", subj.subject_name)
+  ]);
+  const mm = {}; (marks.data || []).forEach(m => mm[m.student_reg_no] = m);
+  const students = (stu.data || []).sort((a, b) => (parseInt(a.roll_no) || 9999) - (parseInt(b.roll_no) || 9999) || a.name.localeCompare(b.name));
+  const show = (v, ab) => ab ? "AB" : (v ?? "—");
+  $("ulDetail").innerHTML = `
+    <h4>${escapeHtml(subj.subject_name)} — ${escapeHtml(CLASS_LABELS[klass] || klass)}</h4>
+    <div class="ra-row">
+      <button class="btn btn-accent" id="ulAll">🔓 Unlock whole class</button>
+      <button class="btn btn-ghost" id="ulRelock">🔒 Lock whole class again</button>
+    </div>
+    <div class="table-wrap"><table class="data"><thead><tr>
+      <th>Roll</th><th>Name</th><th>Written /${subj.written_full}</th><th>Oral ${subj.has_oral ? "/" + subj.oral_full : ""}</th><th>Status</th><th></th></tr></thead><tbody>` +
+    students.map(s => {
+      const m = mm[s.reg_no];
+      const st = !m ? '<span class="ra-pill off">Not entered</span>' : (m.unlocked ? '<span class="ra-pill warn">Unlocked</span>' : '<span class="ra-pill ok">Locked</span>');
+      return `<tr><td>${escapeHtml(s.roll_no || "—")}</td><td>${escapeHtml(s.name)}</td>
+        <td>${m ? show(m.written, m.written_ab) : "—"}</td><td>${subj.has_oral ? (m ? show(m.oral, m.oral_ab) : "—") : "NA"}</td><td>${st}</td>
+        <td>${m && !m.unlocked ? `<button class="btn btn-ghost btn-sm" data-unlock="${m.id}">Unlock</button>` : ""}</td></tr>`;
+    }).join("") + `</tbody></table></div>`;
+
+  const refresh = async () => { await loadStatus(); await openDetail(subj); };
+  const stamp = { unlocked: true, unlocked_by: uid(), unlocked_at: new Date().toISOString() };
+  $("ulDetail").querySelectorAll("[data-unlock]").forEach(b => b.addEventListener("click", async () => {
+    const { error } = await sb().from("result_marks").update(stamp).eq("id", b.dataset.unlock);
+    if (error) showToast(error.message, "error"); else { showToast("Student unlocked.", "success"); refresh(); }
+  }));
+  $("ulAll").addEventListener("click", async () => {
+    if (!confirm(`Unlock ${subj.subject_name} for the whole class? The teacher will be able to edit every student.`)) return;
+    const { error } = await sb().from("result_marks").update(stamp).eq("exam_id", examId).eq("class", klass).eq("subject_name", subj.subject_name);
+    if (error) showToast(error.message, "error"); else { showToast("Class unlocked.", "success"); refresh(); }
+  });
+  $("ulRelock").addEventListener("click", async () => {
+    const { error } = await sb().from("result_marks").update({ unlocked: false }).eq("exam_id", examId).eq("class", klass).eq("subject_name", subj.subject_name);
+    if (error) showToast(error.message, "error"); else { showToast("Class locked.", "success"); refresh(); }
+  });
+}
+
+/* ------------------------------------------------------------ BRANDING */
+function showPreview(id, dataUrl) {
+  $(id).innerHTML = dataUrl ? `<img src="${dataUrl}" alt="" />` : '<span class="ra-muted">Not set</span>';
+}
+function fileToDataUrl(file, maxDim) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onerror = rej;
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = rej;
+      img.onload = () => {
+        const s = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        res(c.toDataURL("image/png"));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+async function loadBranding() {
+  const { data, error } = await sb().from("result_settings").select("*").eq("id", 1).maybeSingle();
+  if (error) { showToast(error.message, "error"); return; }
+  settings = data || {};
+  $("bSchool").value = settings.school_name || "";
+  $("bRegd").value = settings.regd_no || "";
+  $("bAddr").value = settings.address || "";
+  $("bRule").value = settings.pass_rule || "all_pass";
+  $("bCutoff").value = settings.pass_cutoff ?? 25;
+  showPreview("pvBoard", settings.board_logo); showPreview("pvSchool", settings.school_logo); showPreview("pvSign", settings.hm_sign);
+}
+async function saveBranding() {
+  const row = {
+    id: 1, school_name: $("bSchool").value.trim() || "GOLDEN HERITAGE ACADEMY",
+    regd_no: $("bRegd").value.trim(), address: $("bAddr").value.trim(),
+    pass_rule: $("bRule").value, pass_cutoff: Number($("bCutoff").value) || 0,
+    updated_at: new Date().toISOString(), updated_by: uid()
+  };
+  Object.entries(pendingImg).forEach(([k, v]) => { if (v !== undefined) row[k] = v; });   // only changed images are sent
+  const { error } = await sb().from("result_settings").upsert(row, { onConflict: "id" });
+  if (error) { showToast(error.message, "error"); return; }
+  Object.keys(pendingImg).forEach(k => pendingImg[k] = undefined);
+  ["fBoard", "fSchool", "fSign"].forEach(i => $(i).value = "");
+  showToast("Saved.", "success");
+  await loadBranding();
+}
+
+init();
+</script>
+</body>
+</html>

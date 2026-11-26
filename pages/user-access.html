@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>User Access Panel — Golden Heritage Academy Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .mode-tabs {
+    display: inline-flex; background: #fff; border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px; margin-bottom: 18px;
+  }
+  .mode-tabs button {
+    border: none; background: transparent; padding: 8px 18px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; color: var(--ink-soft); cursor: pointer;
+    transition: all var(--dur-fast) ease;
+  }
+  .mode-tabs button.active { background: var(--ink); color: #fff; box-shadow: var(--shadow-xs); }
+
+  .access-layout {
+    display: grid; grid-template-columns: 290px 1fr; gap: 18px; align-items: start;
+  }
+  @media (max-width: 860px) {
+    .access-layout { grid-template-columns: 1fr; }
+  }
+
+  .selector-card { padding: 16px; position: sticky; top: 14px; }
+  .selector-list {
+    max-height: 520px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+    margin-top: 10px; padding-right: 2px;
+  }
+  .selector-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: var(--radius-sm); border: 1px solid var(--line);
+    background: #fff; cursor: pointer; text-align: left; width: 100%;
+    transition: all var(--dur-fast) ease;
+  }
+  .selector-item:hover { border-color: var(--ink-3); background: var(--paper); }
+  .selector-item.active {
+    background: linear-gradient(135deg, var(--ink) 0%, var(--ink-2) 100%);
+    color: #fff; border-color: var(--ink); box-shadow: var(--shadow-sm);
+  }
+  .selector-item .s-avatar {
+    width: 34px; height: 34px; border-radius: 50%; background: var(--paper-3);
+    color: var(--ink); display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; flex-shrink: 0;
+  }
+  .selector-item.active .s-avatar { background: rgba(255,255,255,0.2); color: #fff; }
+  .selector-item .s-info { flex: 1; min-width: 0; }
+  .selector-item .s-title { font-weight: 600; font-size: 13.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .selector-item .s-sub { font-size: 11px; opacity: .75; display: block; margin-top: 2px; }
+  .selector-item .s-count {
+    font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    background: var(--paper-3); color: var(--ink-soft);
+  }
+  .selector-item.active .s-count { background: rgba(34,197,94,0.3); color: #fff; }
+
+  .matrix-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .bulk-bar {
+    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    background: var(--paper); padding: 10px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); margin-bottom: 14px;
+  }
+  .bulk-bar span { font-size: 12px; font-weight: 600; color: var(--ink-soft); margin-right: 4px; }
+
+  .group-header-row td {
+    background: #E0F2FE !important; font-weight: 700; font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .08em; color: var(--ink);
+    padding: 9px 16px !important;
+  }
+
+  .perm-toggle {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 12.5px; font-weight: 600; user-select: none;
+    padding: 5px 9px; border-radius: 6px; border: 1px solid transparent;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .perm-toggle:hover { background: var(--paper-3); }
+  .perm-toggle input { width: 16px; height: 16px; accent-color: var(--ink-2); cursor: pointer; margin: 0; }
+  .perm-toggle.disabled { opacity: 0.3; pointer-events: none; }
+
+  .preset-btns { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
+  .preset-btn {
+    border: 1px solid var(--line); background: #fff; color: var(--ink-soft);
+    font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;
+    cursor: pointer; transition: all 120ms ease;
+  }
+  .preset-btn:hover { border-color: var(--ink-2); color: var(--ink); background: var(--paper); }
+
+  .sticky-save-bar {
+    position: sticky; bottom: 12px; z-index: 50; margin-top: 16px;
+    background: rgba(12, 74, 110, 0.95); color: #fff;
+    padding: 12px 18px; border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up" style="max-width:1220px">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Administration • Granular Permissions</span>
+      <h2>User Access Panel</h2>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn btn-ghost" href="manage-pages.html">🗂️ Manage Pages</a>
+      <button class="btn btn-ghost" id="copyFromUserBtn" style="display:none">📋 Copy From User</button>
+      <button class="btn btn-primary" id="topSaveBtn">💾 Save Permissions</button>
+    </div>
+  </div>
+
+  <div class="mode-tabs">
+    <button type="button" id="modeUserBtn" class="active">👤 Configure by User</button>
+    <button type="button" id="modePageBtn">📄 Configure by Page</button>
+  </div>
+
+  <div class="access-layout">
+    <!-- LEFT SELECTOR (Users or Pages) -->
+    <div class="card selector-card">
+      <div class="field" style="margin-bottom:8px">
+        <label id="selectorLabel" for="selectorSearch">Select User</label>
+        <input class="input" id="selectorSearch" placeholder="Search username or role…" />
+      </div>
+      <div class="selector-list" id="selectorList"></div>
+    </div>
+
+    <!-- RIGHT PERMISSION MATRIX -->
+    <div class="card" id="matrixCard">
+      <div id="matrixArea"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "user-access";
+let myAccess = null;
+let allUsers = [];
+let allPages = [];
+let allPerms = []; // rows from user_page_permissions
+
+let currentMode = "user"; // "user" | "page"
+let selectedUserId = null;
+let selectedPageId = null;
+let selectorFilter = "";
+
+// Working draft map keyed by `${user_id}__${page_id}` -> { can_view, can_create, can_edit, can_delete }
+let draftMap = {};
+let dirtyCount = 0;
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+  if (myAccess.profile.role_name !== "admin" && !myAccess.canView) {
+    document.getElementById("matrixArea").innerHTML =
+      '<div class="empty-state"><div class="icon">🔒</div><h3>Administrator Only</h3><p>Only administrators can configure user permissions.</p></div>';
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("mode") === "page") currentMode = "page";
+
+  document.getElementById("modeUserBtn").onclick = () => switchMode("user");
+  document.getElementById("modePageBtn").onclick = () => switchMode("page");
+  document.getElementById("selectorSearch").oninput = (e) => {
+    selectorFilter = e.target.value.trim().toLowerCase();
+    renderSelector();
+  };
+  document.getElementById("topSaveBtn").onclick = savePermissions;
+  document.getElementById("copyFromUserBtn").onclick = openCopyUserModal;
+
+  await loadAllData(params.get("page_key"));
+}
+
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById("modeUserBtn").classList.toggle("active", mode === "user");
+  document.getElementById("modePageBtn").classList.toggle("active", mode === "page");
+  document.getElementById("selectorLabel").textContent = mode === "user" ? "Select User" : "Select Page";
+  document.getElementById("selectorSearch").placeholder = mode === "user" ? "Search username or role…" : "Search page name or group…";
+  document.getElementById("copyFromUserBtn").style.display = mode === "user" ? "inline-flex" : "none";
+  renderSelector();
+  renderMatrix();
+}
+
+async function loadAllData(initialPageKey = null) {
+  const [uRes, pRes, permRes] = await Promise.all([
+    supabaseClient.from("users").select("user_id, username, mobile_no, status, role_id, roles(role_name)").order("username"),
+    supabaseClient.from("app_pages").select("*").order("menu_group").order("sort_order").order("page_name"),
+    supabaseClient.from("user_page_permissions").select("*")
+  ]);
+
+  if (pRes.error || permRes.error) {
+    document.getElementById("matrixArea").innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🗄️</div>
+        <h3>Database tables not initialized</h3>
+        <p style="max-width:520px">Please run <code>sql/page_and_user_access_migration.sql</code> in your Supabase SQL Editor first to create <code>public.app_pages</code> and <code>public.user_page_permissions</code>.</p>
+      </div>`;
+    return;
+  }
+
+  allUsers = (uRes.data || []).map(u => ({
+    ...u,
+    role_name: u.roles ? u.roles.role_name : "unassigned"
+  }));
+  allPages = pRes.data || [];
+  allPerms = permRes.data || [];
+
+  rebuildDraftMap();
+
+  if (!selectedUserId && allUsers.length) {
+    const nonAdmin = allUsers.find(u => u.role_name !== "admin" && u.status === "active") || allUsers[0];
+    selectedUserId = nonAdmin.user_id;
+  }
+  if (initialPageKey) {
+    const foundPage = allPages.find(p => p.page_key === initialPageKey);
+    if (foundPage) selectedPageId = foundPage.page_id;
+  }
+  if (!selectedPageId && allPages.length) {
+    selectedPageId = allPages[0].page_id;
+  }
+
+  switchMode(currentMode);
+}
+
+function rebuildDraftMap() {
+  draftMap = {};
+  dirtyCount = 0;
+  allPerms.forEach(r => {
+    draftMap[`${r.user_id}__${r.page_id}`] = {
+      can_view: !!r.can_view,
+      can_create: !!r.can_create,
+      can_edit: !!r.can_edit,
+      can_delete: !!r.can_delete
+    };
+  });
+}
+
+function getPerm(userId, pageId) {
+  const key = `${userId}__${pageId}`;
+  if (!draftMap[key]) {
+    draftMap[key] = { can_view: false, can_create: false, can_edit: false, can_delete: false };
+  }
+  return draftMap[key];
+}
+
+function setPerm(userId, pageId, patch) {
+  const cur = getPerm(userId, pageId);
+  const next = { ...cur, ...patch };
+  // Enforce logical consistency:
+  // If Enter Data, Edit, or Delete is enabled -> View must be enabled.
+  if (patch.can_create || patch.can_edit || patch.can_delete) {
+    next.can_view = true;
+  }
+  // If View is unchecked -> clear Enter Data, Edit, Delete.
+  if (patch.can_view === false) {
+    next.can_create = false;
+    next.can_edit = false;
+    next.can_delete = false;
+  }
+  draftMap[`${userId}__${pageId}`] = next;
+  dirtyCount++;
+}
+
+function renderSelector() {
+  const list = document.getElementById("selectorList");
+  if (currentMode === "user") {
+    const filtered = allUsers.filter(u => {
+      if (!selectorFilter) return true;
+      return `${u.username} ${u.role_name} ${u.mobile_no} ${u.status}`.toLowerCase().includes(selectorFilter);
+    });
+    list.innerHTML = filtered.map(u => {
+      const count = allPages.filter(p => getPerm(u.user_id, p.page_id).can_view || u.role_name === "admin").length;
+      const isAct = u.user_id === selectedUserId;
+      return `
+        <button type="button" class="selector-item ${isAct ? "active" : ""}" data-uid="${u.user_id}">
+          <span class="s-avatar">${escapeHtml(u.username.charAt(0).toUpperCase())}</span>
+          <span class="s-info">
+            <span class="s-title">${escapeHtml(u.username)}</span>
+            <span class="s-sub">${escapeHtml(u.role_name)} • ${escapeHtml(u.status)}</span>
+          </span>
+          <span class="s-count" title="Accessible pages">${count}/${allPages.length}</span>
+        </button>
+      `;
+    }).join("") || '<div class="text-muted" style="padding:12px;font-size:13px">No matching users.</div>';
+
+    list.querySelectorAll("[data-uid]").forEach(btn => {
+      btn.onclick = () => {
+        selectedUserId = btn.dataset.uid;
+        renderSelector();
+        renderMatrix();
+      };
+    });
+  } else {
+    const filtered = allPages.filter(p => {
+      if (!selectorFilter) return true;
+      return `${p.page_name} ${p.page_key} ${p.menu_group}`.toLowerCase().includes(selectorFilter);
+    });
+    list.innerHTML = filtered.map(p => {
+      const count = allUsers.filter(u => getPerm(u.user_id, p.page_id).can_view || u.role_name === "admin").length;
+      const isAct = p.page_id === selectedPageId;
+      return `
+        <button type="button" class="selector-item ${isAct ? "active" : ""}" data-pid="${p.page_id}">
+          <span class="s-avatar">${escapeHtml(p.icon || "📄")}</span>
+          <span class="s-info">
+            <span class="s-title">${escapeHtml(p.page_name)}</span>
+            <span class="s-sub">${escapeHtml(p.menu_group || "General")}</span>
+          </span>
+          <span class="s-count" title="Users with access">${count} users</span>
+        </button>
+      `;
+    }).join("") || '<div class="text-muted" style="padding:12px;font-size:13px">No matching pages.</div>';
+
+    list.querySelectorAll("[data-pid]").forEach(btn => {
+      btn.onclick = () => {
+        selectedPageId = btn.dataset.pid;
+        renderSelector();
+        renderMatrix();
+      };
+    });
+  }
+}
+
+function renderMatrix() {
+  const area = document.getElementById("matrixArea");
+  if (currentMode === "user") {
+    renderUserMatrix(area);
+  } else {
+    renderPageMatrix(area);
+  }
+}
+
+function renderUserMatrix(area) {
+  const user = allUsers.find(u => u.user_id === selectedUserId);
+  if (!user) {
+    area.innerHTML = '<div class="empty-state"><div class="icon">👤</div><p>Select a user on the left to configure their page permissions.</p></div>';
+    return;
+  }
+
+  const isAdminUser = user.role_name === "admin";
+  const groups = {};
+  allPages.forEach(p => {
+    const g = p.menu_group || "General";
+    (groups[g] = groups[g] || []).push(p);
+  });
+
+  area.innerHTML = `
+    <div class="matrix-head">
+      <div>
+        <h3 style="margin:0">${escapeHtml(user.username)} ${statusBadge(user.status)}</h3>
+        <div class="text-muted" style="font-size:12.5px;margin-top:4px">
+          Role: <strong>${escapeHtml(user.role_name)}</strong> • Mobile: ${escapeHtml(user.mobile_no || "—")}
+        </div>
+      </div>
+      ${isAdminUser ? '<span class="badge badge-info">Admin role automatically gets full access on all active pages</span>' : ""}
+    </div>
+
+    <div class="bulk-bar">
+      <span>Quick Apply to All Pages:</span>
+      <button type="button" class="btn btn-sm btn-ghost" data-bulk="none">🚫 Clear All</button>
+      <button type="button" class="btn btn-sm btn-ghost" data-bulk="view">👁️ Only View All</button>
+      <button type="button" class="btn btn-sm btn-ghost" data-bulk="create">✍️ View + Enter Data All</button>
+      <button type="button" class="btn btn-sm btn-ghost" data-bulk="full">🛡️ Full Access All</button>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Page</th>
+            <th>👁️ Only View</th>
+            <th>✍️ Enter Data</th>
+            <th>✏️ Edit</th>
+            <th>🗑️ Delete</th>
+            <th style="text-align:right">Row Presets</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${Object.keys(groups).map(gName => `
+            <tr class="group-header-row"><td colspan="6">${escapeHtml(gName)}</td></tr>
+            ${groups[gName].map(p => {
+              const funcs = Array.isArray(p.available_functions) && p.available_functions.length ? p.available_functions : ["view"];
+              const perm = getPerm(user.user_id, p.page_id);
+              const hasCreate = funcs.includes("create");
+              const hasEdit   = funcs.includes("edit");
+              const hasDelete = funcs.includes("delete");
+              return `
+                <tr data-page-row="${p.page_id}">
+                  <td>
+                    <div style="display:flex;align-items:center;gap:9px">
+                      <span style="font-size:19px">${escapeHtml(p.icon || "📄")}</span>
+                      <div>
+                        <strong>${escapeHtml(p.page_name)}</strong>
+                        ${p.is_active === false ? ' <span class="badge badge-neutral">Hidden</span>' : ""}
+                        <div class="text-muted font-mono" style="font-size:11px">${escapeHtml(p.file_location)}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <label class="perm-toggle">
+                      <input type="checkbox" data-p="${p.page_id}" data-f="can_view" ${perm.can_view ? "checked" : ""} />
+                      <span>View</span>
+                    </label>
+                  </td>
+                  <td>
+                    <label class="perm-toggle ${hasCreate ? "" : "disabled"}" title="${hasCreate ? "Allow entering new data" : "Not applicable to this page"}">
+                      <input type="checkbox" data-p="${p.page_id}" data-f="can_create" ${perm.can_create && hasCreate ? "checked" : ""} ${hasCreate ? "" : "disabled"} />
+                      <span>Enter Data</span>
+                    </label>
+                  </td>
+                  <td>
+                    <label class="perm-toggle ${hasEdit ? "" : "disabled"}" title="${hasEdit ? "Allow editing records" : "Not applicable to this page"}">
+                      <input type="checkbox" data-p="${p.page_id}" data-f="can_edit" ${perm.can_edit && hasEdit ? "checked" : ""} ${hasEdit ? "" : "disabled"} />
+                      <span>Edit</span>
+                    </label>
+                  </td>
+                  <td>
+                    <label class="perm-toggle ${hasDelete ? "" : "disabled"}" title="${hasDelete ? "Allow deleting records" : "Not applicable to this page"}">
+                      <input type="checkbox" data-p="${p.page_id}" data-f="can_delete" ${perm.can_delete && hasDelete ? "checked" : ""} ${hasDelete ? "" : "disabled"} />
+                      <span>Delete</span>
+                    </label>
+                  </td>
+                  <td>
+                    <div class="preset-btns">
+                      <button type="button" class="preset-btn" data-preset="none" data-p="${p.page_id}">None</button>
+                      <button type="button" class="preset-btn" data-preset="view" data-p="${p.page_id}">View</button>
+                      ${hasCreate ? `<button type="button" class="preset-btn" data-preset="create" data-p="${p.page_id}">+Data</button>` : ""}
+                      <button type="button" class="preset-btn" data-preset="full" data-p="${p.page_id}">Full</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sticky-save-bar">
+      <div>
+        <strong>Configuring: ${escapeHtml(user.username)}</strong>
+        <span style="font-size:12.5px;opacity:.85;margin-left:8px">Changes take effect immediately in the user's sidebar menu after saving.</span>
+      </div>
+      <button type="button" class="btn btn-accent" id="bottomSaveBtn">💾 Save Permissions for ${escapeHtml(user.username)}</button>
+    </div>
+  `;
+
+  area.querySelectorAll("input[type='checkbox'][data-p]").forEach(chk => {
+    chk.onchange = () => {
+      const pid = chk.dataset.p;
+      const field = chk.dataset.f;
+      setPerm(user.user_id, pid, { [field]: chk.checked });
+      renderSelector();
+      renderMatrix();
+    };
+  });
+
+  area.querySelectorAll("[data-preset]").forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.p;
+      const page = allPages.find(x => x.page_id === pid);
+      const funcs = (page && page.available_functions) || ["view"];
+      const mode = btn.dataset.preset;
+      applyPresetToUserPage(user.user_id, pid, funcs, mode);
+      renderSelector();
+      renderMatrix();
+    };
+  });
+
+  area.querySelectorAll("[data-bulk]").forEach(btn => {
+    btn.onclick = () => {
+      const mode = btn.dataset.bulk;
+      allPages.forEach(p => {
+        if (p.menu_group === "Administration" && user.role_name !== "admin" && mode !== "none") return;
+        const funcs = p.available_functions || ["view"];
+        applyPresetToUserPage(user.user_id, p.page_id, funcs, mode);
+      });
+      renderSelector();
+      renderMatrix();
+    };
+  });
+
+  document.getElementById("bottomSaveBtn").onclick = savePermissions;
+}
+
+function renderPageMatrix(area) {
+  const page = allPages.find(p => p.page_id === selectedPageId);
+  if (!page) {
+    area.innerHTML = '<div class="empty-state"><div class="icon">📄</div><p>Select a page on the left to assign user access.</p></div>';
+    return;
+  }
+
+  const funcs = Array.isArray(page.available_functions) && page.available_functions.length ? page.available_functions : ["view"];
+  const hasCreate = funcs.includes("create");
+  const hasEdit   = funcs.includes("edit");
+  const hasDelete = funcs.includes("delete");
+
+  area.innerHTML = `
+    <div class="matrix-head">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:28px">${escapeHtml(page.icon || "📄")}</span>
+        <div>
+          <h3 style="margin:0">${escapeHtml(page.page_name)} <span class="badge badge-neutral">${escapeHtml(page.menu_group || "General")}</span></h3>
+          <div class="text-muted font-mono" style="font-size:12px;margin-top:3px">${escapeHtml(page.file_location)} (Key: ${escapeHtml(page.page_key)})</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>👁️ Only View</th>
+            <th>✍️ Enter Data</th>
+            <th>✏️ Edit</th>
+            <th>🗑️ Delete</th>
+            <th style="text-align:right">Row Presets</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${allUsers.map(u => {
+            const perm = getPerm(u.user_id, page.page_id);
+            return `
+              <tr>
+                <td>
+                  <strong>${escapeHtml(u.username)}</strong>
+                  <div class="text-muted" style="font-size:11.5px">${escapeHtml(u.role_name)} • ${escapeHtml(u.status)}</div>
+                </td>
+                <td>
+                  <label class="perm-toggle">
+                    <input type="checkbox" data-u="${u.user_id}" data-f="can_view" ${perm.can_view ? "checked" : ""} />
+                    <span>View</span>
+                  </label>
+                </td>
+                <td>
+                  <label class="perm-toggle ${hasCreate ? "" : "disabled"}">
+                    <input type="checkbox" data-u="${u.user_id}" data-f="can_create" ${perm.can_create && hasCreate ? "checked" : ""} ${hasCreate ? "" : "disabled"} />
+                    <span>Enter Data</span>
+                  </label>
+                </td>
+                <td>
+                  <label class="perm-toggle ${hasEdit ? "" : "disabled"}">
+                    <input type="checkbox" data-u="${u.user_id}" data-f="can_edit" ${perm.can_edit && hasEdit ? "checked" : ""} ${hasEdit ? "" : "disabled"} />
+                    <span>Edit</span>
+                  </label>
+                </td>
+                <td>
+                  <label class="perm-toggle ${hasDelete ? "" : "disabled"}">
+                    <input type="checkbox" data-u="${u.user_id}" data-f="can_delete" ${perm.can_delete && hasDelete ? "checked" : ""} ${hasDelete ? "" : "disabled"} />
+                    <span>Delete</span>
+                  </label>
+                </td>
+                <td>
+                  <div class="preset-btns">
+                    <button type="button" class="preset-btn" data-upreset="none" data-u="${u.user_id}">None</button>
+                    <button type="button" class="preset-btn" data-upreset="view" data-u="${u.user_id}">View</button>
+                    ${hasCreate ? `<button type="button" class="preset-btn" data-upreset="create" data-u="${u.user_id}">+Data</button>` : ""}
+                    <button type="button" class="preset-btn" data-upreset="full" data-u="${u.user_id}">Full</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sticky-save-bar">
+      <div>
+        <strong>Configuring Page: ${escapeHtml(page.page_name)}</strong>
+        <span style="font-size:12.5px;opacity:.85;margin-left:8px">Users with View enabled will immediately see this page in their menu.</span>
+      </div>
+      <button type="button" class="btn btn-accent" id="bottomSavePageBtn">💾 Save Page Access</button>
+    </div>
+  `;
+
+  area.querySelectorAll("input[type='checkbox'][data-u]").forEach(chk => {
+    chk.onchange = () => {
+      const uid = chk.dataset.u;
+      const field = chk.dataset.f;
+      setPerm(uid, page.page_id, { [field]: chk.checked });
+      renderSelector();
+      renderMatrix();
+    };
+  });
+
+  area.querySelectorAll("[data-upreset]").forEach(btn => {
+    btn.onclick = () => {
+      const uid = btn.dataset.u;
+      applyPresetToUserPage(uid, page.page_id, funcs, btn.dataset.upreset);
+      renderSelector();
+      renderMatrix();
+    };
+  });
+
+  document.getElementById("bottomSavePageBtn").onclick = savePermissions;
+}
+
+function applyPresetToUserPage(userId, pageId, funcs, mode) {
+  if (mode === "none") {
+    setPerm(userId, pageId, { can_view: false, can_create: false, can_edit: false, can_delete: false });
+  } else if (mode === "view") {
+    setPerm(userId, pageId, { can_view: true, can_create: false, can_edit: false, can_delete: false });
+  } else if (mode === "create") {
+    setPerm(userId, pageId, { can_view: true, can_create: funcs.includes("create"), can_edit: false, can_delete: false });
+  } else if (mode === "full") {
+    setPerm(userId, pageId, {
+      can_view: true,
+      can_create: funcs.includes("create"),
+      can_edit: funcs.includes("edit"),
+      can_delete: funcs.includes("delete")
+    });
+  }
+}
+
+function openCopyUserModal() {
+  const targetUser = allUsers.find(u => u.user_id === selectedUserId);
+  if (!targetUser) return;
+  const otherUsers = allUsers.filter(u => u.user_id !== targetUser.user_id);
+
+  openModal({
+    title: `Copy Permissions to ${targetUser.username}`,
+    subtitle: "Select an existing user whose page permissions you want to copy",
+    bodyHtml: `
+      <div class="field">
+        <label for="sourceUserSelect">Copy permissions from</label>
+        <select class="input" id="sourceUserSelect">
+          ${otherUsers.map(u => `<option value="${u.user_id}">${escapeHtml(u.username)} (${escapeHtml(u.role_name)})</option>`).join("")}
+        </select>
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="applyCopyBtn">Copy &amp; Preview</button>
+    `,
+    onOpen: () => {
+      document.getElementById("applyCopyBtn").onclick = () => {
+        const srcId = document.getElementById("sourceUserSelect").value;
+        if (!srcId) return;
+        allPages.forEach(p => {
+          const srcPerm = getPerm(srcId, p.page_id);
+          setPerm(targetUser.user_id, p.page_id, { ...srcPerm });
+        });
+        closeModal();
+        renderSelector();
+        renderMatrix();
+        showToast("Permissions copied into preview. Click Save Permissions to apply.", "success");
+      };
+    }
+  });
+}
+
+async function savePermissions() {
+  const topBtn = document.getElementById("topSaveBtn");
+  topBtn.disabled = true;
+  topBtn.innerHTML = '<span class="spinner"></span> Saving…';
+
+  const session = await getSession();
+  const adminUid = session ? session.user.id : null;
+  const now = new Date().toISOString();
+
+  const rowsToUpsert = [];
+  if (currentMode === "user" && selectedUserId) {
+    allPages.forEach(p => {
+      const perm = getPerm(selectedUserId, p.page_id);
+      rowsToUpsert.push({
+        user_id: selectedUserId,
+        page_id: p.page_id,
+        can_view: !!perm.can_view,
+        can_create: !!perm.can_create,
+        can_edit: !!perm.can_edit,
+        can_delete: !!perm.can_delete,
+        updated_by: adminUid,
+        updated_at: now
+      });
+    });
+  } else if (currentMode === "page" && selectedPageId) {
+    allUsers.forEach(u => {
+      const perm = getPerm(u.user_id, selectedPageId);
+      rowsToUpsert.push({
+        user_id: u.user_id,
+        page_id: selectedPageId,
+        can_view: !!perm.can_view,
+        can_create: !!perm.can_create,
+        can_edit: !!perm.can_edit,
+        can_delete: !!perm.can_delete,
+        updated_by: adminUid,
+        updated_at: now
+      });
+    });
+  }
+
+  const { error } = await supabaseClient
+    .from("user_page_permissions")
+    .upsert(rowsToUpsert, { onConflict: "user_id,page_id" });
+
+  topBtn.disabled = false;
+  topBtn.textContent = "💾 Save Permissions";
+
+  if (error) {
+    showToast("Failed to save permissions: " + error.message, "error");
+    return;
+  }
+
+  await logAudit(
+    "user_page_permissions",
+    currentMode === "user" ? selectedUserId : selectedPageId,
+    "update",
+    null,
+    { mode: currentMode, count: rowsToUpsert.length }
+  );
+
+  showToast("User access permissions saved to Supabase!", "success");
+
+  if (window.parent && typeof window.parent.refreshPortalMenu === "function") {
+    window.parent.refreshPortalMenu();
+  }
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Dashboard — Golden Heritage Academy Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-top: 6px; }
+  .stat-card { padding: 20px 22px; }
+  .stat-card .n { font-family: var(--font-display); font-size: 32px; font-weight: 700; line-height: 1; }
+  .stat-card .l { font-size: 11.5px; color: var(--ink-faint); margin-top: 8px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .welcome-banner {
+    background: linear-gradient(135deg, #0284C7 0%, #0EA5E9 60%, #38BDF8 100%);
+    color: #fff; border-radius: var(--radius-lg); padding: 30px 28px; margin-bottom: 20px;
+    position: relative; overflow: hidden;
+    box-shadow: var(--shadow-md);
+    border: 1px solid rgba(186,230,253,0.5);
+  }
+  .welcome-banner::before {
+    content: "GH"; position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
+    font-family: var(--font-display); font-size: 80px; font-weight: 700;
+    color: rgba(76,175,80,0.10); line-height: 1; pointer-events: none; user-select: none;
+  }
+  .welcome-banner::after {
+    content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px;
+    border-radius: 50%; background: radial-gradient(circle, rgba(76,175,80,0.18) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .welcome-banner .eyebrow-w {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--brass-light); font-weight: 700; margin-bottom: 6px; opacity: .9;
+  }
+  .welcome-banner h2 { color: #fff; margin-bottom: 6px; font-size: 24px; }
+  .welcome-banner p { color: rgba(255,255,255,0.62); margin: 0; font-size: 13.5px; }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="welcome-banner">
+    <div class="eyebrow-w">Golden Heritage Academy</div>
+    <h2 id="hello">Welcome</h2>
+    <p id="roleLine">—</p>
+  </div>
+
+  <div class="stat-grid" id="statGrid">
+    <div class="card stat-card"><div class="n skeleton" style="width:40px;height:26px"></div><div class="l">Active users</div></div>
+    <div class="card stat-card"><div class="n skeleton" style="width:40px;height:26px"></div><div class="l">Pending approvals</div></div>
+    <div class="card stat-card"><div class="n skeleton" style="width:40px;height:26px"></div><div class="l">Roles</div></div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "dashboard";
+
+async function init() {
+  const { profile } = await getMyAccess(PAGE_ID);
+  if (!profile) return;
+
+  document.getElementById("hello").textContent = `Welcome back, ${profile.username}`;
+  document.getElementById("roleLine").textContent = `Signed in as ${profile.role_name}`;
+
+  const grid = document.getElementById("statGrid");
+  // Admin-only counts; other roles just see the welcome banner cards hidden gracefully.
+  if (profile.role_name === "admin") {
+    const [{ count: activeCount }, { count: pendingCount }, { count: roleCount }] = await Promise.all([
+      supabaseClient.from("users").select("*", { count: "exact", head: true }).eq("status", "active"),
+      supabaseClient.from("users").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      supabaseClient.from("roles").select("*", { count: "exact", head: true })
+    ]);
+    grid.innerHTML = `
+      <div class="card stat-card"><div class="n">${activeCount ?? 0}</div><div class="l">Active users</div></div>
+      <div class="card stat-card"><div class="n">${pendingCount ?? 0}</div><div class="l">Pending approvals</div></div>
+      <div class="card stat-card"><div class="n">${roleCount ?? 0}</div><div class="l">Roles</div></div>
+    `;
+  } else {
+    grid.style.display = "none";
+  }
+}
+init();
+</script>
+</body>
+</html>

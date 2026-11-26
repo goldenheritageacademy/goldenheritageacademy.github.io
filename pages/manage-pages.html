@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Manage Pages — Golden Heritage Academy Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .toolbar {
+    display: flex; gap: 10px; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; margin-bottom: 16px;
+  }
+  .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filter-pills button {
+    border: 1px solid var(--line); background: #fff; padding: 6px 13px;
+    border-radius: 999px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+    color: var(--ink-soft); transition: all var(--dur-fast) ease;
+  }
+  .filter-pills button:hover { border-color: var(--ink-2); color: var(--ink); }
+  .filter-pills button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  .search-box { min-width: 240px; flex: 1; max-width: 340px; }
+
+  .func-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .func-chip {
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .func-chip.view   { background: #E0F2FE; color: #0369A1; }
+  .func-chip.create { background: #DCFCE7; color: #15803D; }
+  .func-chip.edit   { background: #FEF3C7; color: #B45309; }
+  .func-chip.delete { background: #FEE2E2; color: #B91C1C; }
+
+  .emoji-picker-grid {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+    padding: 8px; background: var(--paper); border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+  }
+  .emoji-btn {
+    width: 34px; height: 34px; border-radius: 8px; border: 1px solid transparent;
+    background: #fff; font-size: 18px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+  }
+  .emoji-btn:hover { transform: scale(1.12); border-color: var(--ink-2); background: var(--paper-3); }
+
+  .fn-check-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px;
+  }
+  .fn-check-card {
+    display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px;
+    border: 1.5px solid var(--line); border-radius: var(--radius-sm);
+    background: #fff; cursor: pointer; transition: border-color 140ms ease, background 140ms ease;
+  }
+  .fn-check-card:hover { border-color: var(--ink-3); background: var(--paper); }
+  .fn-check-card input { margin-top: 3px; accent-color: var(--ink-2); width: 16px; height: 16px; }
+  .fn-check-card .fn-title { font-size: 13px; font-weight: 600; color: var(--ink); display: block; }
+  .fn-check-card .fn-sub { font-size: 11px; color: var(--ink-faint); display: block; margin-top: 2px; }
+
+  .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 560px) {
+    .form-row-2, .fn-check-grid { grid-template-columns: 1fr; }
+  }
+
+  .workflow-banner {
+    background: linear-gradient(135deg, #E0F2FE 0%, #F0FDF4 100%);
+    border: 1px solid var(--line-strong); border-radius: var(--radius-md);
+    padding: 14px 18px; margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  }
+  .workflow-steps { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--ink); }
+  .workflow-steps .step-badge {
+    background: var(--ink); color: #fff; font-weight: 700; font-size: 11px;
+    padding: 3px 8px; border-radius: 999px;
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Administration • Portal Registry</span>
+      <h2>Manage Pages</h2>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn btn-ghost" href="user-access.html">🔐 User Access Panel</a>
+      <button class="btn btn-primary" id="addBtn">+ Register New Page</button>
+    </div>
+  </div>
+
+  <div class="workflow-banner">
+    <div class="workflow-steps">
+      <span><span class="step-badge">Step 1</span> Upload your new <code>pages/your-page.html</code> file to GitHub</span>
+      <span>→</span>
+      <span><span class="step-badge">Step 2</span> Register its Emoji, Name, Location &amp; Group here</span>
+      <span>→</span>
+      <span><span class="step-badge">Step 3</span> Grant user access in <strong>User Access Panel</strong></span>
+    </div>
+  </div>
+
+  <div class="stat-grid" id="statsArea" style="margin-bottom:20px"></div>
+
+  <div class="toolbar">
+    <div class="filter-pills" id="groupPills"></div>
+    <input class="input search-box" id="searchInput" placeholder="Search by page name, path, or key…" />
+  </div>
+
+  <div id="listArea"></div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "manage-pages";
+const EMOJI_PALETTE = ["🏠","📈","📌","🎓","📚","🧾","💰","📊","💳","📋","🗂️","💵","🧑","🚌","🏫","🧪","🏆","📝","🔔","⚙️","🔐","✅","🏷️","🕒","📄"];
+const DEFAULT_GROUPS = ["General", "Academics", "Accounts", "Fees", "Staff & Salary", "Administration"];
+
+let myAccess = null;
+let allPages = [];
+let activeGroup = "ALL";
+let searchQuery = "";
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+  if (myAccess.profile.role_name !== "admin" && !myAccess.canView) {
+    document.getElementById("listArea").innerHTML =
+      '<div class="empty-state"><div class="icon">🔒</div><h3>Administrator Only</h3><p>Only administrators can manage the portal page registry.</p></div>';
+    return;
+  }
+
+  document.getElementById("addBtn").onclick = () => openPageModal(null);
+  document.getElementById("searchInput").oninput = (e) => {
+    searchQuery = e.target.value.trim().toLowerCase();
+    renderTable();
+  };
+
+  await loadPages();
+}
+
+async function loadPages() {
+  const area = document.getElementById("listArea");
+  area.innerHTML = '<div class="card"><div class="skeleton" style="height:28px;margin-bottom:10px"></div><div class="skeleton" style="height:28px;margin-bottom:10px"></div><div class="skeleton" style="height:28px"></div></div>';
+
+  const { data, error } = await supabaseClient
+    .from("app_pages")
+    .select("*")
+    .order("menu_group", { ascending: true })
+    .order("sort_order", { ascending: true })
+    .order("page_name", { ascending: true });
+
+  if (error) {
+    area.innerHTML = `
+      <div class="card">
+        <div class="empty-state">
+          <div class="icon">🗄️</div>
+          <h3>Database table <code>public.app_pages</code> not found yet</h3>
+          <p style="max-width:520px">Run <code>sql/page_and_user_access_migration.sql</code> in your Supabase SQL Editor to create <code>app_pages</code> and <code>user_page_permissions</code> and seed your existing pages.</p>
+          <p style="margin-top:10px;font-size:12px;color:var(--danger)">${escapeHtml(error.message)}</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  allPages = data || [];
+  renderStats();
+  renderGroupPills();
+  renderTable();
+
+  if (window.parent && typeof window.parent.refreshPortalMenu === "function") {
+    window.parent.refreshPortalMenu();
+  }
+}
+
+function renderStats() {
+  const total = allPages.length;
+  const active = allPages.filter(p => p.is_active !== false).length;
+  const groups = new Set(allPages.map(p => p.menu_group || "General")).size;
+  document.getElementById("statsArea").innerHTML = `
+    <div class="card stat-card"><div class="n">${total}</div><div class="l">Total Registered Pages</div></div>
+    <div class="card stat-card"><div class="n" style="color:var(--success)">${active}</div><div class="l">Active in Menu</div></div>
+    <div class="card stat-card"><div class="n">${total - active}</div><div class="l">Hidden / Inactive</div></div>
+    <div class="card stat-card"><div class="n">${groups}</div><div class="l">Menu Groups</div></div>
+  `;
+}
+
+function renderGroupPills() {
+  const groups = ["ALL", ...new Set([...DEFAULT_GROUPS, ...allPages.map(p => p.menu_group || "General")])];
+  const wrap = document.getElementById("groupPills");
+  wrap.innerHTML = groups.map(g => `
+    <button type="button" class="${activeGroup === g ? "active" : ""}" data-group="${escapeHtml(g)}">
+      ${g === "ALL" ? "All Groups" : escapeHtml(g)}
+    </button>
+  `).join("");
+  wrap.querySelectorAll("button").forEach(btn => {
+    btn.onclick = () => {
+      activeGroup = btn.dataset.group;
+      renderGroupPills();
+      renderTable();
+    };
+  });
+}
+
+function formatFunctionsHtml(funcs) {
+  const list = Array.isArray(funcs) && funcs.length ? funcs : ["view"];
+  const labels = {
+    view:   '<span class="func-chip view">👁️ View</span>',
+    create: '<span class="func-chip create">✍️ Enter Data</span>',
+    edit:   '<span class="func-chip edit">✏️ Edit</span>',
+    delete: '<span class="func-chip delete">🗑️ Delete</span>'
+  };
+  return `<div class="func-chips">${list.map(f => labels[f] || "").join("")}</div>`;
+}
+
+function renderTable() {
+  const area = document.getElementById("listArea");
+  const filtered = allPages.filter(p => {
+    if (activeGroup !== "ALL" && (p.menu_group || "General") !== activeGroup) return false;
+    if (searchQuery) {
+      const hay = `${p.page_name || ""} ${p.page_key || ""} ${p.file_location || ""} ${p.menu_group || ""} ${p.function_notes || ""}`.toLowerCase();
+      if (!hay.includes(searchQuery)) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    area.innerHTML = `<div class="card"><div class="empty-state"><div class="icon">🗂️</div><h3>No matching pages</h3><p>Click "+ Register New Page" to add a page to the Supabase table.</p></div></div>`;
+    return;
+  }
+
+  area.innerHTML = `
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th style="width:52px">Icon</th>
+            <th>Page Name &amp; Key</th>
+            <th>Group &amp; Order</th>
+            <th>File Location / URL</th>
+            <th>Page Functions</th>
+            <th>Status</th>
+            <th style="text-align:right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map(p => `
+            <tr>
+              <td style="font-size:22px;text-align:center">${escapeHtml(p.icon || "📄")}</td>
+              <td>
+                <strong>${escapeHtml(p.page_name)}</strong>
+                <div class="text-muted font-mono" style="font-size:11.5px;margin-top:2px">ID: ${escapeHtml(p.page_key)}</div>
+                ${p.function_notes ? `<div class="text-muted" style="font-size:11.5px;margin-top:3px">${escapeHtml(p.function_notes)}</div>` : ""}
+              </td>
+              <td>
+                <span class="badge badge-neutral">${escapeHtml(p.menu_group || "General")}</span>
+                <div class="text-muted" style="font-size:11px;margin-top:4px">Order: ${p.sort_order ?? 10}</div>
+              </td>
+              <td class="font-mono" style="font-size:12px;word-break:break-all">${escapeHtml(p.file_location)}</td>
+              <td>${formatFunctionsHtml(p.available_functions)}</td>
+              <td>
+                ${p.is_active !== false
+                  ? '<span class="badge badge-success">Active</span>'
+                  : '<span class="badge badge-neutral">Hidden</span>'}
+              </td>
+              <td>
+                <div class="row-actions">
+                  <a class="btn btn-sm btn-ghost" href="user-access.html?mode=page&page_key=${encodeURIComponent(p.page_key)}" title="Assign users to this page">🔐 Access</a>
+                  <button class="btn btn-sm btn-ghost" data-toggle="${p.page_id}" title="${p.is_active !== false ? "Hide from menu" : "Show in menu"}">
+                    ${p.is_active !== false ? "Hide" : "Show"}
+                  </button>
+                  <button class="btn btn-sm btn-ghost" data-edit="${p.page_id}">Edit</button>
+                  <button class="btn btn-sm btn-danger" data-del="${p.page_id}">Delete</button>
+                </div>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  area.querySelectorAll("[data-edit]").forEach(btn => {
+    btn.onclick = () => {
+      const row = allPages.find(x => x.page_id === btn.dataset.edit);
+      if (row) openPageModal(row);
+    };
+  });
+
+  area.querySelectorAll("[data-toggle]").forEach(btn => {
+    btn.onclick = () => {
+      const row = allPages.find(x => x.page_id === btn.dataset.toggle);
+      if (row) togglePageStatus(row);
+    };
+  });
+
+  area.querySelectorAll("[data-del]").forEach(btn => {
+    btn.onclick = () => {
+      const row = allPages.find(x => x.page_id === btn.dataset.del);
+      if (row) confirmDeletePage(row);
+    };
+  });
+}
+
+function slugifyPageName(str) {
+  return String(str || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function openPageModal(existing) {
+  const isEdit = !!existing;
+  const funcs = isEdit && Array.isArray(existing.available_functions)
+    ? existing.available_functions
+    : ["view", "create", "edit", "delete"];
+  const groups = [...new Set([...DEFAULT_GROUPS, ...allPages.map(p => p.menu_group || "General")])];
+
+  openModal({
+    title: isEdit ? `Edit Page: ${existing.page_name}` : "Register New Page",
+    subtitle: "Add page details so it appears in the User Access Panel and sidebar menu",
+    wide: true,
+    bodyHtml: `
+      <div class="form-row-2">
+        <div class="field">
+          <label for="fPageName">Page Name (Menu Label) *</label>
+          <input class="input" id="fPageName" placeholder="e.g. Library Books" value="${isEdit ? escapeHtml(existing.page_name) : ""}" />
+          <div class="hint">Shown in the left sidebar menu.</div>
+        </div>
+        <div class="field">
+          <label for="fIcon">Emoji / Icon *</label>
+          <input class="input" id="fIcon" placeholder="e.g. 📚" value="${isEdit ? escapeHtml(existing.icon || "📄") : "📄"}" style="font-size:18px" />
+          <div class="emoji-picker-grid" id="emojiGrid">
+            ${EMOJI_PALETTE.map(em => `<button type="button" class="emoji-btn" data-em="${em}">${em}</button>`).join("")}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row-2">
+        <div class="field">
+          <label for="fLocation">File Location / Path *</label>
+          <input class="input font-mono" id="fLocation" placeholder="pages/library-books.html" value="${isEdit ? escapeHtml(existing.file_location) : ""}" />
+          <div class="hint">Path in your GitHub repo (e.g. <code>pages/my-page.html</code>) or full external URL.</div>
+        </div>
+        <div class="field">
+          <label for="fPageKey">Page ID / Key *</label>
+          <input class="input font-mono" id="fPageKey" placeholder="library-books" value="${isEdit ? escapeHtml(existing.page_key) : ""}" />
+          <div class="hint">Matches <code>PAGE_ID</code> inside the HTML file (or filename).</div>
+        </div>
+      </div>
+
+      <div class="form-row-2">
+        <div class="field">
+          <label for="fGroup">Menu Group *</label>
+          <input class="input" id="fGroup" list="groupOptionsList" placeholder="e.g. Academics" value="${isEdit ? escapeHtml(existing.menu_group || "General") : "General"}" />
+          <datalist id="groupOptionsList">
+            ${groups.map(g => `<option value="${escapeHtml(g)}"></option>`).join("")}
+          </datalist>
+          <div class="hint">Pick an existing group or type a new group heading.</div>
+        </div>
+        <div class="form-row-2" style="gap:10px">
+          <div class="field">
+            <label for="fOrder">Sort Order</label>
+            <input class="input" type="number" id="fOrder" value="${isEdit ? (existing.sort_order ?? 10) : 10}" />
+            <div class="hint">Lower = higher in menu.</div>
+          </div>
+          <div class="field">
+            <label for="fActive">Menu Status</label>
+            <select class="input" id="fActive">
+              <option value="true" ${!isEdit || existing.is_active !== false ? "selected" : ""}>Active (Visible)</option>
+              <option value="false" ${isEdit && existing.is_active === false ? "selected" : ""}>Hidden / Inactive</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Functions Supported by This Page *</label>
+        <div class="fn-check-grid">
+          <label class="fn-check-card">
+            <input type="checkbox" id="fnView" checked disabled />
+            <span>
+              <span class="fn-title">👁️ Only View (Read)</span>
+              <span class="fn-sub">Open page, view tables, search &amp; export reports</span>
+            </span>
+          </label>
+          <label class="fn-check-card">
+            <input type="checkbox" id="fnCreate" ${funcs.includes("create") ? "checked" : ""} />
+            <span>
+              <span class="fn-title">✍️ Enter Data (Create / Upload)</span>
+              <span class="fn-sub">Add new records, submit forms &amp; bulk uploads</span>
+            </span>
+          </label>
+          <label class="fn-check-card">
+            <input type="checkbox" id="fnEdit" ${funcs.includes("edit") ? "checked" : ""} />
+            <span>
+              <span class="fn-title">✏️ Edit Records (Update)</span>
+              <span class="fn-sub">Modify existing records, status or settings</span>
+            </span>
+          </label>
+          <label class="fn-check-card">
+            <input type="checkbox" id="fnDelete" ${funcs.includes("delete") ? "checked" : ""} />
+            <span>
+              <span class="fn-title">🗑️ Delete Records</span>
+              <span class="fn-sub">Permanently remove records on this page</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field" style="margin-bottom:4px">
+        <label for="fNotes">Page Functions Description (Optional)</label>
+        <input class="input" id="fNotes" placeholder="e.g. Issue books, record returns, manage book inventory" value="${isEdit ? escapeHtml(existing.function_notes || "") : ""}" />
+      </div>
+      <div class="field-error" id="pageFormErr">Please provide Page Name, Emoji Icon, File Location, and Page ID.</div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="savePageBtn">${isEdit ? "Save Changes" : "Register Page"}</button>
+    `,
+    onOpen: () => {
+      const nameIn = document.getElementById("fPageName");
+      const locIn = document.getElementById("fLocation");
+      const keyIn = document.getElementById("fPageKey");
+      const iconIn = document.getElementById("fIcon");
+
+      let keyTouched = isEdit;
+      let locTouched = isEdit;
+      keyIn.oninput = () => { keyTouched = true; };
+      locIn.oninput = () => {
+        locTouched = true;
+        if (!keyTouched) {
+          const fname = locIn.value.split("/").pop().replace(/\.html?$/i, "");
+          if (fname) keyIn.value = fname;
+        }
+      };
+      nameIn.oninput = () => {
+        const slug = slugifyPageName(nameIn.value);
+        if (!keyTouched) keyIn.value = slug;
+        if (!locTouched) locIn.value = slug ? `pages/${slug}.html` : "";
+      };
+
+      document.querySelectorAll("#emojiGrid .emoji-btn").forEach(b => {
+        b.onclick = () => { iconIn.value = b.dataset.em; };
+      });
+
+      document.getElementById("savePageBtn").onclick = () => savePage(existing);
+    }
+  });
+}
+
+async function savePage(existing) {
+  const isEdit = !!existing;
+  const page_name = document.getElementById("fPageName").value.trim();
+  const icon = document.getElementById("fIcon").value.trim() || "📄";
+  const file_location = document.getElementById("fLocation").value.trim();
+  const page_key = document.getElementById("fPageKey").value.trim();
+  const menu_group = document.getElementById("fGroup").value.trim() || "General";
+  const sort_order = parseInt(document.getElementById("fOrder").value, 10) || 10;
+  const is_active = document.getElementById("fActive").value === "true";
+  const function_notes = document.getElementById("fNotes").value.trim() || null;
+
+  const available_functions = ["view"];
+  if (document.getElementById("fnCreate").checked) available_functions.push("create");
+  if (document.getElementById("fnEdit").checked)   available_functions.push("edit");
+  if (document.getElementById("fnDelete").checked) available_functions.push("delete");
+
+  const errEl = document.getElementById("pageFormErr");
+  if (!page_name || !file_location || !page_key) {
+    errEl.classList.add("show");
+    return;
+  }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("savePageBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  const payload = await withAuditStamp({
+    page_key,
+    page_name,
+    icon,
+    file_location,
+    menu_group,
+    sort_order,
+    available_functions,
+    function_notes,
+    is_active
+  }, { isNew: !isEdit });
+
+  if (isEdit) {
+    const { error } = await supabaseClient
+      .from("app_pages")
+      .update(payload)
+      .eq("page_id", existing.page_id);
+    if (error) {
+      showToast("Update failed: " + error.message, "error");
+      btn.disabled = false;
+      btn.textContent = "Save Changes";
+      return;
+    }
+    await logAudit("app_pages", existing.page_id, "update", existing, payload);
+    showToast(`Page "${page_name}" updated.`, "success");
+  } else {
+    const { data, error } = await supabaseClient
+      .from("app_pages")
+      .insert(payload)
+      .select()
+      .single();
+    if (error) {
+      showToast("Failed to register page: " + error.message, "error");
+      btn.disabled = false;
+      btn.textContent = "Register Page";
+      return;
+    }
+    await logAudit("app_pages", data.page_id, "insert", null, payload);
+    showToast(`Page "${page_name}" registered! You can now grant users access to it.`, "success");
+  }
+
+  closeModal();
+  await fetchAppPages(true);
+  await loadPages();
+}
+
+async function togglePageStatus(row) {
+  const newStatus = !(row.is_active !== false);
+  const payload = await withAuditStamp({ is_active: newStatus }, { isNew: false });
+  const { error } = await supabaseClient
+    .from("app_pages")
+    .update(payload)
+    .eq("page_id", row.page_id);
+  if (error) {
+    showToast("Could not update status: " + error.message, "error");
+    return;
+  }
+  await logAudit("app_pages", row.page_id, "update", { is_active: row.is_active }, payload);
+  showToast(`"${row.page_name}" is now ${newStatus ? "active in menus" : "hidden"}.`, "success");
+  await fetchAppPages(true);
+  await loadPages();
+}
+
+function confirmDeletePage(row) {
+  openModal({
+    title: "Remove Page from Registry?",
+    subtitle: "This removes the page and its user permission entries from Supabase.",
+    bodyHtml: `
+      <p>Are you sure you want to delete <strong>${escapeHtml(row.icon)} ${escapeHtml(row.page_name)}</strong> (<code>${escapeHtml(row.file_location)}</code>) from the page registry?</p>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-danger" id="confirmDelBtn">Delete Page</button>
+    `,
+    onOpen: () => {
+      document.getElementById("confirmDelBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("app_pages").delete().eq("page_id", row.page_id);
+        if (error) {
+          showToast("Delete failed: " + error.message, "error");
+          return;
+        }
+        await logAudit("app_pages", row.page_id, "delete", row, null);
+        closeModal();
+        showToast(`Page "${row.page_name}" removed.`, "success");
+        await fetchAppPages(true);
+        await loadPages();
+      };
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>

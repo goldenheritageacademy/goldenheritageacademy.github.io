@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mark Entry — Golden Heritage Academy Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .me-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+  .me-row .field { min-width: 200px; margin-bottom: 0; }
+  .me-mark { width: 90px; text-align: center; text-transform: uppercase; }
+  .me-mark.bad { border-color: #dc2626 !important; background: #fef2f2; }
+  .me-mark[readonly] { background: #f3f4f6; opacity: .85; }
+  .me-full { font-size: 12px; opacity: .65; margin-left: 4px; }
+  .me-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .me-pill.lock { background: #dcfce7; color: #166534; }
+  .me-pill.open { background: #fef3c7; color: #92400e; }
+  .me-pill.new  { background: #e5e7eb; color: #374151; }
+  .me-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+  .me-note { padding: 10px 14px; border-radius: 8px; background: #eff6ff; color: #1e3a8a; margin-bottom: 14px; font-size: 14px; }
+  .me-note.warn { background: #fffbeb; color: #92400e; }
+  .me-bulk { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; padding: 12px 14px; border: 1px dashed #cbd5e1; border-radius: 10px; }
+  .me-bulk b { margin-right: 6px; }
+  .me-modal-bg { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .me-modal { background: #fff; color: #111827; border-radius: 12px; width: min(960px, 100%); max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
+  .me-modal-h { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; }
+  .me-modal-h h3 { margin: 0 0 4px; }
+  .me-modal-b { padding: 14px 20px; overflow: auto; flex: 1; }
+  .me-modal-f { padding: 14px 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+  .me-sum { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .me-errbox { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; max-height: 160px; overflow: auto; }
+  .me-errbox ul { margin: 6px 0 0 18px; padding: 0; }
+  .me-pv { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .me-pv th, .me-pv td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; }
+  .me-pv th { position: sticky; top: 0; background: #f9fafb; }
+  .me-pv td.bad { background: #fef2f2; color: #b91c1c; font-weight: 600; }
+  .me-pv tr.rowbad td:first-child { border-left: 3px solid #dc2626; }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <span class="eyebrow">Academics</span>
+    <h1>Mark Entry</h1>
+    <p>Enter marks for the class and subject allotted to you. Type <b>AB</b> for an absent student. Every box must be filled.</p>
+  </div>
+
+  <div class="card">
+    <div class="me-row">
+      <div class="field" style="min-width:280px;"><label for="mExam">Exam</label><select class="input" id="mExam"></select></div>
+      <div class="field"><label for="mClass">Class</label><select class="input" id="mClass"></select></div>
+      <div class="field"><label for="mSubject">Subject</label><select class="input" id="mSubject"></select></div>
+    </div>
+    <div id="mInfo"></div>
+    <div class="me-bulk" id="mBulk" style="display:none;">
+      <b>Bulk entry (Excel)</b>
+      <button class="btn" id="mDownload" type="button">⬇️ Download Excel</button>
+      <button class="btn btn-primary" id="mUploadBtn" type="button" data-perm="create">⬆️ Upload filled Excel</button>
+      <input type="file" id="mFile" accept=".xlsx,.xls" style="display:none;" />
+      <span class="ra-muted" style="font-size:12px;">Fill the downloaded file, then upload it. You will see a preview first; nothing is saved unless every row is valid.</span>
+    </div>
+    <div id="mTable"></div>
+    <div class="me-bar" id="mBar" style="display:none;">
+      <span id="mCount" class="ra-muted"></span>
+      <button class="btn btn-primary" id="mSubmit" data-perm="create">✅ Submit marks</button>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "mark-entry";
+let myAccess = null;
+const $ = id => document.getElementById(id);
+const sb = () => supabaseClient;
+
+const CLASS_LABELS = {
+  "1":"Class 1","2":"Class 2","3":"Class 3","4":"Class 4","5":"Class 5","6":"Class 6","7":"Class 7",
+  "8":"Class 8","9":"Class 9","10":"Class 10","11-arts":"Class 11 - Arts","11-science":"Class 11 - Science",
+  "12-arts":"Class 12 - Arts","12-science":"Class 12 - Science"
+};
+
+let isAdmin = false;
+let allocs = [];          // what this user may enter
+let setupByClass = {};    // class -> [setup rows] for the selected exam
+let cur = null;           // { setup, rows:[...] }
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+  isAdmin = /admin/i.test(myAccess.profile.role_name || "");
+
+  let q = sb().from("result_teacher_alloc").select("*");
+  if (!isAdmin) q = q.eq("teacher_id", String(myAccess.profile.user_id));
+  const { data, error } = await q;
+  if (error) { showToast(error.message, "error"); return; }
+  allocs = data || [];
+  if (!allocs.length) {
+    $("mTable").innerHTML = `<div class="empty-state"><div class="icon">📚</div><p>No class or subject has been allotted to you yet. Please ask the administrator.</p></div>`;
+    return;
+  }
+
+  const { data: exams } = await sb().from("result_exams").select("id,name,academic_session").order("created_at", { ascending: false });
+  $("mExam").innerHTML = (exams || []).map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("") || '<option value="">No exams</option>';
+  $("mExam").addEventListener("change", onExam);
+  $("mClass").addEventListener("change", onClass);
+  $("mSubject").addEventListener("change", loadSheet);
+  $("mSubmit").addEventListener("click", submitMarks);
+  $("mDownload").addEventListener("click", downloadTemplate);
+  $("mUploadBtn").addEventListener("click", () => $("mFile").click());
+  $("mFile").addEventListener("change", onFilePicked);
+  await onExam();
+}
+
+async function onExam() {
+  const examId = $("mExam").value;
+  cur = null; $("mTable").innerHTML = ""; $("mBar").style.display = "none"; $("mBulk").style.display = "none"; $("mInfo").innerHTML = "";
+  if (!examId) return;
+  const { data } = await sb().from("result_subject_setup").select("*").eq("exam_id", examId).order("sort_order");
+  setupByClass = {};
+  (data || []).forEach(s => (setupByClass[s.class] ||= []).push(s));
+  const classes = Object.keys(CLASS_LABELS).filter(c => setupByClass[c] && allocs.some(a => a.class === c && setupByClass[c].some(s => s.subject_name === a.subject_name)));
+  $("mClass").innerHTML = classes.map(c => `<option value="${c}">${CLASS_LABELS[c]}</option>`).join("");
+  if (!classes.length) {
+    $("mSubject").innerHTML = "";
+    $("mTable").innerHTML = `<div class="empty-state"><div class="icon">📝</div><p>This exam has no subject setup for your allotted classes yet.</p></div>`;
+    return;
+  }
+  onClass();
+}
+
+function onClass() {
+  const c = $("mClass").value;
+  const mine = new Set(allocs.filter(a => a.class === c).map(a => a.subject_name));
+  const subs = (setupByClass[c] || []).filter(s => mine.has(s.subject_name));
+  $("mSubject").innerHTML = subs.map(s => `<option value="${escapeHtml(s.subject_name)}">${escapeHtml(s.subject_name)}</option>`).join("");
+  loadSheet();
+}
+
+/* ---------- parsing / validation ---------- */
+function parseMark(txt, full) {
+  const t = String(txt ?? "").trim().toUpperCase();
+  if (t === "") return { err: "Required" };
+  if (t === "AB") return { ab: true, value: null };
+  if (!/^\d+(\.\d+)?$/.test(t)) return { err: "Enter a number or AB" };
+  const n = parseFloat(t);
+  if (n > full) return { err: `Cannot exceed ${full}` };
+  return { ab: false, value: n };
+}
+const fmt = (v, ab) => ab ? "AB" : (v === null || v === undefined ? "" : String(Number(v)));
+
+/* ---------- load class sheet ---------- */
+async function loadSheet() {
+  const examId = $("mExam").value, klass = $("mClass").value, subject = $("mSubject").value;
+  $("mInfo").innerHTML = ""; $("mTable").innerHTML = ""; $("mBar").style.display = "none"; $("mBulk").style.display = "none"; cur = null;
+  if (!examId || !klass || !subject) return;
+  const setup = (setupByClass[klass] || []).find(s => s.subject_name === subject);
+  if (!setup) return;
+  $("mTable").innerHTML = '<div class="skeleton" style="height:18px"></div>';
+
+  const [stu, marks] = await Promise.all([
+    sb().from("student_master").select("reg_no,name,roll_no,section").eq("class", klass).eq("status", "active"),
+    sb().from("result_marks").select("*").eq("exam_id", examId).eq("class", klass).eq("subject_name", subject)
+  ]);
+  if (stu.error || marks.error) { showToast((stu.error || marks.error).message, "error"); return; }
+  const mm = {}; (marks.data || []).forEach(m => mm[m.student_reg_no] = m);
+  const students = (stu.data || []).sort((a, b) =>
+    (parseInt(a.roll_no) || 99999) - (parseInt(b.roll_no) || 99999) || a.name.localeCompare(b.name));
+
+  cur = { setup, examId, klass, subject, rows: students.map(s => {
+    const m = mm[s.reg_no];
+    return { reg: s.reg_no, name: s.name, roll: s.roll_no, section: s.section, saved: !!m, unlocked: !!m?.unlocked,
+      locked: !!m && !m.unlocked,
+      w: m ? fmt(m.written, m.written_ab) : "", o: m ? fmt(m.oral, m.oral_ab) : "" };
+  }) };
+  renderSheet();
+}
+
+function renderSheet() {
+  const { setup, rows } = cur;
+  if (!rows.length) { $("mTable").innerHTML = `<div class="empty-state"><div class="icon">🎓</div><p>No active students in this class.</p></div>`; return; }
+  const editable = rows.filter(r => !r.locked).length;
+  const lockedCnt = rows.length - editable;
+
+  if (!editable) $("mInfo").innerHTML = `<div class="me-note">✅ All marks for this subject are submitted. You can view them here but not change them. Ask the administrator to unlock if a correction is needed.</div>`;
+  else if (lockedCnt) $("mInfo").innerHTML = `<div class="me-note warn">Some students are locked. Only unlocked or new students can be edited.</div>`;
+  else $("mInfo").innerHTML = `<div class="me-note">Full marks — Written <b>${setup.written_full}</b>${setup.has_oral ? `, Oral <b>${setup.oral_full}</b>` : " (no oral for this subject)"}. Once submitted you cannot edit.</div>`;
+
+  $("mTable").innerHTML = `<div class="table-wrap"><table class="data"><thead><tr>
+    <th>Roll</th><th>Name</th><th>Section</th><th>Written<span class="me-full">/${setup.written_full}</span></th>
+    ${setup.has_oral ? `<th>Oral<span class="me-full">/${setup.oral_full}</span></th>` : ""}<th>Status</th></tr></thead><tbody>` +
+    rows.map((r, i) => `<tr>
+      <td>${escapeHtml(r.roll || "—")}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.section || "—")}</td>
+      <td><input class="input me-mark" data-i="${i}" data-f="w" value="${escapeHtml(r.w)}" ${r.locked ? "readonly" : ""} autocomplete="off" inputmode="text" /></td>
+      ${setup.has_oral ? `<td><input class="input me-mark" data-i="${i}" data-f="o" value="${escapeHtml(r.o)}" ${r.locked ? "readonly" : ""} autocomplete="off" inputmode="text" /></td>` : ""}
+      <td>${r.locked ? '<span class="me-pill lock">🔒 Submitted</span>' : (r.unlocked ? '<span class="me-pill open">🔓 Unlocked</span>' : '<span class="me-pill new">Pending</span>')}</td>
+    </tr>`).join("") + `</tbody></table></div>`;
+
+  $("mTable").querySelectorAll(".me-mark:not([readonly])").forEach(inp => {
+    inp.addEventListener("input", () => { cur.rows[+inp.dataset.i][inp.dataset.f] = inp.value; inp.classList.remove("bad"); updateCount(); });
+    inp.addEventListener("blur", () => {
+      const full = inp.dataset.f === "w" ? setup.written_full : setup.oral_full;
+      if (inp.value.trim() !== "") inp.classList.toggle("bad", !!parseMark(inp.value, full).err);
+    });
+    inp.addEventListener("keydown", e => {            // Enter moves down the column
+      if (e.key !== "Enter") return; e.preventDefault();
+      const list = [...$("mTable").querySelectorAll(`.me-mark[data-f="${inp.dataset.f}"]:not([readonly])`)];
+      list[list.indexOf(inp) + 1]?.focus();
+    });
+  });
+  $("mBar").style.display = editable ? "flex" : "none";
+  $("mBulk").style.display = editable ? "flex" : "none";
+  updateCount();
+}
+
+function updateCount() {
+  const { setup, rows } = cur;
+  const ed = rows.filter(r => !r.locked);
+  const done = ed.filter(r => r.w.trim() !== "" && (!setup.has_oral || r.o.trim() !== "")).length;
+  $("mCount").textContent = `${done} of ${ed.length} students filled`;
+}
+
+function makeRecord(reg, w, o) {
+  const { setup, examId, klass, subject } = cur;
+  return {
+    exam_id: examId, class: klass, subject_name: subject, student_reg_no: reg,
+    written: w.value, written_ab: !!w.ab,
+    oral: setup.has_oral ? o.value : null, oral_ab: setup.has_oral ? !!o.ab : false,
+    unlocked: false, entered_by: String(myAccess.profile.user_id), entered_by_name: myAccess.profile.username,
+    entered_at: new Date().toISOString()
+  };
+}
+
+/* ---------- submit ---------- */
+async function submitMarks() {
+  if (!cur) return;
+  const { setup, rows, examId, klass, subject } = cur;
+  const payload = []; let firstBad = null, errCount = 0;
+
+  $("mTable").querySelectorAll(".me-mark").forEach(i => i.classList.remove("bad"));
+  rows.forEach((r, i) => {
+    if (r.locked) return;
+    const w = parseMark(r.w, setup.written_full);
+    const o = setup.has_oral ? parseMark(r.o, setup.oral_full) : { ab: false, value: null };
+    const mark = (f, res) => {
+      if (!res.err) return;
+      errCount++;
+      const el = $("mTable").querySelector(`.me-mark[data-i="${i}"][data-f="${f}"]`);
+      el?.classList.add("bad"); firstBad ||= el;
+    };
+    mark("w", w); if (setup.has_oral) mark("o", o);
+    if (!w.err && !o.err) payload.push(makeRecord(r.reg, w, o));
+  });
+
+  if (errCount) {
+    showToast(`${errCount} box(es) are empty or invalid. Fill every box (use AB for absent).`, "error");
+    firstBad?.scrollIntoView({ block: "center", behavior: "smooth" }); firstBad?.focus();
+    return;
+  }
+  if (!payload.length) { showToast("Nothing to submit.", "error"); return; }
+  if (!confirm(`Submit ${subject} marks for ${payload.length} student(s)?\n\nAfter submitting you will not be able to change them.`)) return;
+
+  $("mSubmit").disabled = true;
+  const { error } = await sb().from("result_marks").upsert(payload, { onConflict: "exam_id,student_reg_no,subject_name" });
+  $("mSubmit").disabled = false;
+  if (error) { showToast("Could not submit: " + error.message, "error"); return; }
+  showToast("Marks submitted.", "success");
+  await loadSheet();
+}
+
+/* ================= BULK EXCEL ENTRY ================= */
+let pending = null; // { payload, ... } waiting for confirmation in preview
+
+function downloadTemplate() {
+  if (!cur) return;
+  if (typeof XLSX === "undefined") { showToast("Excel library failed to load. Check your internet and reload.", "error"); return; }
+  const { setup, rows, examId, klass, subject } = cur;
+  const ed = rows.filter(r => !r.locked);
+  if (!ed.length) { showToast("No editable students in this sheet.", "error"); return; }
+
+  const head = ["Reg No", "Roll", "Name", "Section", `Written (max ${setup.written_full})`];
+  if (setup.has_oral) head.push(`Oral (max ${setup.oral_full})`);
+  const aoa = [head].concat(ed.map(r => {
+    const line = [String(r.reg), r.roll ?? "", r.name, r.section ?? "", r.w];
+    if (setup.has_oral) line.push(r.o);
+    return line;
+  }));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{ wch: 14 }, { wch: 7 }, { wch: 30 }, { wch: 9 }, { wch: 18 }].concat(setup.has_oral ? [{ wch: 16 }] : []);
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+  const examName = ($("mExam").selectedOptions[0]?.textContent || "").trim();
+  const ins = XLSX.utils.aoa_to_sheet([
+    ["How to fill"],
+    ["1. Fill only the Written" + (setup.has_oral ? " and Oral" : "") + " columns. Do not change Reg No, and do not add, delete or reorder students."],
+    ["2. Enter a number (not more than the maximum) or AB for an absent student."],
+    ["3. Every box must be filled. Blank boxes will be rejected."],
+    ["4. Do not rename or edit the sheets. Upload this same file back on the Mark Entry page."],
+    [""],
+    ["Exam", examName], ["Class", CLASS_LABELS[klass] || klass], ["Subject", subject]
+  ]);
+  ins["!cols"] = [{ wch: 110 }, { wch: 30 }];
+  const meta = XLSX.utils.aoa_to_sheet([
+    ["key", "value"], ["exam_id", String(examId)], ["class", String(klass)], ["subject", subject],
+    ["written_full", String(setup.written_full)], ["oral_full", String(setup.oral_full ?? "")], ["has_oral", setup.has_oral ? "1" : "0"]
+  ]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Marks");
+  XLSX.utils.book_append_sheet(wb, ins, "Instructions");
+  XLSX.utils.book_append_sheet(wb, meta, "_meta");
+  wb.Workbook = { Sheets: [{ Hidden: 0 }, { Hidden: 0 }, { Hidden: 1 }] };
+  const safe = t => String(t).replace(/[^\w\-]+/g, "_").replace(/^_+|_+$/g, "");
+  XLSX.writeFile(wb, `Marks_${safe(examName)}_${safe(CLASS_LABELS[klass] || klass)}_${safe(subject)}.xlsx`);
+}
+
+async function onFilePicked(e) {
+  const file = e.target.files[0];
+  e.target.value = "";           // allow re-selecting the same file
+  if (!file || !cur) return;
+  if (typeof XLSX === "undefined") { showToast("Excel library failed to load. Check your internet and reload.", "error"); return; }
+  if (!/\.xlsx?$/i.test(file.name)) { showToast("Please upload an Excel file (.xlsx).", "error"); return; }
+  if (file.size > 5 * 1024 * 1024) { showToast("File is too large.", "error"); return; }
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    validateWorkbook(wb, file.name);
+  } catch (err) {
+    console.error(err);
+    showToast("Could not read this file. Use the Excel downloaded from this page.", "error");
+  }
+}
+
+function validateWorkbook(wb, fileName) {
+  const { setup, rows, examId, klass, subject } = cur;
+  const fileErrors = [];          // problems with the file as a whole
+  const rowErrors = [];           // problems on specific rows
+
+  // ---- 1. file must belong to the current exam / class / subject
+  const metaWs = wb.Sheets["_meta"];
+  if (!metaWs) fileErrors.push("This is not a file downloaded from this page (the _meta sheet is missing). Please download the Excel again.");
+  else {
+    const meta = {};
+    XLSX.utils.sheet_to_json(metaWs, { header: 1, defval: "" }).forEach(r => { if (r[0]) meta[String(r[0])] = String(r[1] ?? ""); });
+    if (meta.exam_id !== String(examId)) fileErrors.push("This file is for a different exam than the one selected.");
+    if (meta.class !== String(klass)) fileErrors.push("This file is for a different class than the one selected.");
+    if (meta.subject !== String(subject)) fileErrors.push(`This file is for subject "${meta.subject}", but "${subject}" is selected.`);
+  }
+  const ws = wb.Sheets["Marks"];
+  if (!ws) fileErrors.push('The "Marks" sheet is missing.');
+
+  const parsed = [];
+  if (ws && !fileErrors.length) {
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: true });
+    const hdr = (aoa[0] || []).map(h => String(h).trim().toLowerCase());
+    const iReg = hdr.findIndex(h => h.startsWith("reg"));
+    const iW = hdr.findIndex(h => h.startsWith("written"));
+    const iO = hdr.findIndex(h => h.startsWith("oral"));
+    if (iReg < 0) fileErrors.push('The "Reg No" column is missing.');
+    if (iW < 0) fileErrors.push('The "Written" column is missing.');
+    if (setup.has_oral && iO < 0) fileErrors.push('The "Oral" column is missing.');
+    if (!setup.has_oral && iO >= 0) fileErrors.push("This subject has no oral marks, but the file has an Oral column.");
+
+    if (!fileErrors.length) {
+      const editable = new Map(rows.filter(r => !r.locked).map(r => [String(r.reg).trim(), r]));
+      const lockedRegs = new Set(rows.filter(r => r.locked).map(r => String(r.reg).trim()));
+      const seen = new Set();
+      const cell = (row, i) => i < 0 ? "" : String(row[i] ?? "").trim();
+
+      for (let k = 1; k < aoa.length; k++) {
+        const line = aoa[k];
+        const reg = cell(line, iReg), wRaw = cell(line, iW), oRaw = setup.has_oral ? cell(line, iO) : "";
+        if (!reg && !wRaw && !oRaw) continue;            // completely empty row
+        const xl = k + 1;                                // Excel row number
+        const rec = { xl, reg, w: wRaw, o: oRaw, name: "", roll: "", errs: [], wErr: null, oErr: null };
+
+        if (!reg) rec.errs.push("Reg No is missing");
+        else if (lockedRegs.has(reg)) rec.errs.push("Marks already submitted (locked) for this student");
+        else if (!editable.has(reg)) rec.errs.push("Student not found in this class");
+        else if (seen.has(reg)) rec.errs.push("Duplicate row for this student");
+        else { seen.add(reg); rec.name = editable.get(reg).name; rec.roll = editable.get(reg).roll || ""; }
+
+        const w = parseMark(wRaw, setup.written_full);
+        if (w.err) { rec.wErr = w.err; rec.errs.push("Written: " + w.err); }
+        let o = { ab: false, value: null };
+        if (setup.has_oral) {
+          o = parseMark(oRaw, setup.oral_full);
+          if (o.err) { rec.oErr = o.err; rec.errs.push("Oral: " + o.err); }
+        }
+        rec.parsedW = w; rec.parsedO = o;
+        parsed.push(rec);
+      }
+      if (!parsed.length) fileErrors.push("The file has no student rows.");
+
+      // every editable student must be present
+      editable.forEach((r, reg) => { if (!seen.has(reg)) rowErrors.push(`Missing student: ${r.name} (${reg}) is not in the file.`); });
+    }
+  }
+  parsed.forEach(r => { if (r.errs.length) rowErrors.push(`Row ${r.xl}${r.name ? " – " + r.name : ""}${r.reg ? " (" + r.reg + ")" : ""}: ${r.errs.join("; ")}`); });
+
+  const valid = !fileErrors.length && !rowErrors.length;
+  pending = valid ? parsed.map(r => makeRecord(r.reg, r.parsedW, r.parsedO)) : null;
+  showPreview({ fileName, parsed, fileErrors, rowErrors, valid });
+}
+
+function showPreview({ fileName, parsed, fileErrors, rowErrors, valid }) {
+  const { setup } = cur;
+  closePreview();
+  const badRows = parsed.filter(r => r.errs.length).length;
+  const allErrs = fileErrors.concat(rowErrors);
+  const cellTd = (raw, err) => `<td class="${err ? "bad" : ""}" ${err ? `title="${escapeHtml(err)}"` : ""}>${raw === "" ? "<i>empty</i>" : escapeHtml(raw.toUpperCase())}${err ? `<br><small>${escapeHtml(err)}</small>` : ""}</td>`;
+  const table = parsed.length ? `<div class="table-wrap"><table class="me-pv"><thead><tr><th>Excel row</th><th>Roll</th><th>Name</th><th>Written</th>${setup.has_oral ? "<th>Oral</th>" : ""}<th>Result</th></tr></thead><tbody>` +
+    parsed.map(r => `<tr class="${r.errs.length ? "rowbad" : ""}"><td>${r.xl}</td><td>${escapeHtml(String(r.roll || "—"))}</td><td>${escapeHtml(r.name || r.reg || "—")}</td>
+      ${cellTd(r.w, r.wErr)}${setup.has_oral ? cellTd(r.o, r.oErr) : ""}
+      <td>${r.errs.length ? `<span style="color:#b91c1c">✖ ${escapeHtml(r.errs.filter(e => !/^(Written|Oral):/.test(e)).join("; ") || "Fix marks")}</span>` : '<span style="color:#166534">✔ OK</span>'}</td></tr>`).join("") + "</tbody></table></div>" : "";
+
+  const root = $("modalRoot");
+  const bg = document.createElement("div");
+  bg.className = "me-modal-bg"; bg.id = "mPreview";
+  bg.innerHTML = `<div class="me-modal" role="dialog" aria-modal="true">
+    <div class="me-modal-h"><h3>Preview — ${escapeHtml(cur.subject)} · ${escapeHtml(CLASS_LABELS[cur.klass] || cur.klass)}</h3>
+      <div class="ra-muted" style="font-size:12px;">${escapeHtml(fileName)}</div></div>
+    <div class="me-modal-b">
+      <div class="me-sum">
+        <span class="me-pill new">${parsed.length} row(s) read</span>
+        <span class="me-pill lock">${parsed.length - badRows} valid</span>
+        <span class="me-pill ${badRows || fileErrors.length || rowErrors.length ? "open" : "new"}" style="${allErrs.length ? "background:#fee2e2;color:#991b1b" : ""}">${allErrs.length} problem(s)</span>
+      </div>
+      ${allErrs.length ? `<div class="me-errbox"><b>Nothing has been saved. Fix these in the Excel and upload again:</b><ul>${allErrs.map(e => `<li>${escapeHtml(e)}</li>`).join("")}</ul></div>`
+        : `<div class="me-note">✅ All rows are valid. Click <b>Confirm &amp; submit</b> to save. After submitting you cannot edit these marks.</div>`}
+      ${table}
+    </div>
+    <div class="me-modal-f">
+      <button class="btn" id="mPvCancel" type="button">${valid ? "Cancel" : "Close"}</button>
+      ${valid ? `<button class="btn btn-primary" id="mPvOk" type="button">✅ Confirm &amp; submit ${parsed.length} student(s)</button>` : ""}
+    </div></div>`;
+  root.appendChild(bg);
+  $("mPvCancel").addEventListener("click", closePreview);
+  bg.addEventListener("click", e => { if (e.target === bg) closePreview(); });
+  if (valid) $("mPvOk").addEventListener("click", confirmBulkUpload);
+}
+
+function closePreview() { $("mPreview")?.remove(); }
+
+async function confirmBulkUpload() {
+  if (!pending || !pending.length) return;
+  const btn = $("mPvOk"); btn.disabled = true; btn.textContent = "Saving…";
+  const { error } = await sb().from("result_marks").upsert(pending, { onConflict: "exam_id,student_reg_no,subject_name" });
+  if (error) { btn.disabled = false; btn.textContent = "Retry submit"; showToast("Could not submit: " + error.message, "error"); return; }
+  const n = pending.length; pending = null;
+  closePreview();
+  showToast(`Marks submitted for ${n} student(s).`, "success");
+  await loadSheet();
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Extra Out — Golden Heritage Academy Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .eo-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .eo-tab { padding:9px 16px; border:1px solid var(--brass); border-radius:var(--radius-sm); background:transparent; color:var(--ink); cursor:pointer; font-weight:600; }
+  .eo-tab.active { background:var(--brass); color:#fff; }
+  .eo-panel { display:none; }
+  .eo-panel.active { display:block; }
+  .eo-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; margin-bottom:18px; }
+  .eo-summary .card { padding:16px 18px; }
+  .eo-summary .label { font-size:.75rem; opacity:.7; text-transform:uppercase; }
+  .eo-summary .value { font-size:1.45rem; font-weight:700; margin-top:5px; }
+  .eo-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .eo-toolbar .input { max-width:360px; }
+  .eo-person { color:var(--ink-2); cursor:pointer; font-weight:700; background:none; border:0; padding:0; font:inherit; }
+  .eo-person:hover { text-decoration:underline; }
+  .eo-actions { display:flex; gap:6px; white-space:nowrap; }
+  .eo-num { text-align:right; white-space:nowrap; }
+  .eo-empty { text-align:center; padding:26px 18px; color:var(--ink-faint); }
+  .eo-note { color:var(--ink-faint); font-size:.82rem; margin-top:8px; }
+  @media(max-width:600px){ .eo-toolbar { align-items:stretch; } .eo-toolbar .input { max-width:none; } }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div><span class="eyebrow">Accounts</span><h1>Extra Out</h1><p>Track money temporarily given to people and repayments received.</p></div>
+    <button class="btn btn-ghost" id="refreshBtn">↻ Refresh</button>
+  </div>
+
+  <div class="eo-tabs" role="tablist">
+    <button class="eo-tab active" data-tab="report" role="tab">Report</button>
+    <button class="eo-tab" data-tab="extra-out" role="tab">Extra Out</button>
+    <button class="eo-tab" data-tab="adjustment" role="tab">Adjustment</button>
+  </div>
+
+  <section class="eo-panel active" id="panel-report">
+    <div class="eo-summary">
+      <div class="card"><div class="label">Total Given</div><div class="value" id="totalGiven">₹0.00</div></div>
+      <div class="card"><div class="label">Total Returned</div><div class="value" id="totalReturned">₹0.00</div></div>
+      <div class="card"><div class="label">Total Due</div><div class="value" id="totalDue">₹0.00</div></div>
+    </div>
+    <div class="card">
+      <div class="eo-toolbar"><strong>People with outstanding due</strong><input class="input" id="reportSearch" placeholder="Search name…" aria-label="Search people" /></div>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th class="eo-num">Given</th><th class="eo-num">Returned</th><th class="eo-num">Due</th></tr></thead><tbody id="reportBody"></tbody></table></div>
+      <div class="eo-empty" id="reportEmpty" style="display:none;">No outstanding extra out records.</div>
+      <p class="eo-note">Select a name to open the full ledger.</p>
+    </div>
+  </section>
+
+  <section class="eo-panel" id="panel-extra-out">
+    <div class="card">
+      <div class="eo-toolbar"><strong>Extra Out History</strong><div><button class="btn btn-primary" id="addOutBtn">+ Give Money</button></div><input class="input" id="outSearch" placeholder="Search history…" aria-label="Search extra out history" /></div>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Name</th><th>Mode</th><th class="eo-num">Amount</th><th>Reason</th><th>Actions</th></tr></thead><tbody id="outBody"></tbody></table></div>
+      <div class="eo-empty" id="outEmpty" style="display:none;">No extra out records yet.</div>
+    </div>
+  </section>
+
+  <section class="eo-panel" id="panel-adjustment">
+    <div class="card">
+      <div class="eo-toolbar"><strong>Adjustment History</strong><div><button class="btn btn-primary" id="addAdjustmentBtn">+ Record Return</button></div><input class="input" id="adjustmentSearch" placeholder="Search history…" aria-label="Search adjustment history" /></div>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Name</th><th>Mode</th><th class="eo-num">Amount</th><th>Remark</th><th>Actions</th></tr></thead><tbody id="adjustmentBody"></tbody></table></div>
+      <div class="eo-empty" id="adjustmentEmpty" style="display:none;">No repayments recorded yet.</div>
+    </div>
+  </section>
+</div>
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+<script>
+const PAGE_ID = "extra-out";
+const $ = id => document.getElementById(id);
+const money = n => "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits:2, maximumFractionDigits:2 });
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+};
+const TYPE_LABEL = { extra_out:"Extra Out", adjustment:"Adjustment" };
+const MODE_LABEL = { cash:"Cash", bank:"Bank", phonepe:"PhonePe" };
+let myAccess = null;
+let records = [];
+let activeTab = "report";
+
+async function fetchAllRecords() {
+  const rows = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabaseClient.from("extra_out_transactions")
+      .select("*").order("txn_date", { ascending:false }).order("created_at", { ascending:false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) return rows;
+  }
+}
+
+function personKey(name) { return String(name || "").trim().toLocaleLowerCase(); }
+function getLedgers(source = records, asOf = null) {
+  const map = new Map();
+  source.filter(r => !asOf || r.txn_date <= asOf).forEach(r => {
+    const key = personKey(r.person_name);
+    if (!key) return;
+    if (!map.has(key)) map.set(key, { key, name:r.person_name.trim(), given:0, returned:0, due:0, entries:[] });
+    const ledger = map.get(key);
+    if (!ledger.name || r.person_name.localeCompare(ledger.name) < 0) ledger.name = r.person_name.trim();
+    const amount = Number(r.amount) || 0;
+    if (r.txn_type === "extra_out") ledger.given += amount;
+    else ledger.returned += amount;
+    ledger.entries.push(r);
+  });
+  map.forEach(l => { l.due = l.given - l.returned; });
+  return map;
+}
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+  document.querySelectorAll(".eo-tab").forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
+  $("refreshBtn").onclick = loadRecords;
+  $("addOutBtn").onclick = () => openRecordModal("extra_out", null);
+  $("addAdjustmentBtn").onclick = () => openRecordModal("adjustment", null);
+  $("addOutBtn").style.display = myAccess.canCreate ? "inline-flex" : "none";
+  $("addAdjustmentBtn").style.display = myAccess.canCreate ? "inline-flex" : "none";
+  $("reportSearch").oninput = renderReport;
+  $("outSearch").oninput = () => renderHistory("extra_out");
+  $("adjustmentSearch").oninput = () => renderHistory("adjustment");
+  await loadRecords();
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll(".eo-tab").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tab));
+  document.querySelectorAll(".eo-panel").forEach(panel => panel.classList.toggle("active", panel.id === "panel-" + tab));
+}
+
+async function loadRecords() {
+  try {
+    records = await fetchAllRecords();
+    renderAll();
+  } catch (error) {
+    showToast("Failed to load Extra Out history: " + error.message, "error");
+  }
+}
+
+function renderAll() {
+  renderReport();
+  renderHistory("extra_out");
+  renderHistory("adjustment");
+}
+
+function renderReport() {
+  const currentRecords = records.filter(r => r.txn_date <= today());
+  const ledgers = [...getLedgers(records, today()).values()].sort((a,b) => a.name.localeCompare(b.name));
+  const allDue = ledgers.reduce((sum, l) => sum + Math.max(0, l.due), 0);
+  $("totalGiven").textContent = money(currentRecords.filter(r => r.txn_type === "extra_out").reduce((s,r) => s + Number(r.amount || 0), 0));
+  $("totalReturned").textContent = money(currentRecords.filter(r => r.txn_type === "adjustment").reduce((s,r) => s + Number(r.amount || 0), 0));
+  $("totalDue").textContent = money(allDue);
+  const search = $("reportSearch").value.trim().toLocaleLowerCase();
+  const rows = ledgers.filter(l => l.due > 0.005 && l.name.toLocaleLowerCase().includes(search));
+  $("reportEmpty").style.display = rows.length ? "none" : "block";
+  $("reportBody").innerHTML = rows.map(l => `
+    <tr>
+      <td><button class="eo-person" data-ledger="${escapeHtml(l.key)}">${escapeHtml(l.name)}</button></td>
+      <td class="eo-num">${money(l.given)}</td><td class="eo-num">${money(l.returned)}</td><td class="eo-num"><strong>${money(l.due)}</strong></td>
+    </tr>`).join("");
+  $("reportBody").querySelectorAll("[data-ledger]").forEach(btn => btn.onclick = () => openLedger(btn.dataset.ledger));
+}
+
+function renderHistory(type) {
+  const isOut = type === "extra_out";
+  const body = $(isOut ? "outBody" : "adjustmentBody");
+  const empty = $(isOut ? "outEmpty" : "adjustmentEmpty");
+  const search = $(isOut ? "outSearch" : "adjustmentSearch").value.trim().toLocaleLowerCase();
+  const rows = records.filter(r => r.txn_type === type && [
+    r.txn_date, r.person_name, r.payment_mode, r.amount, r.reason
+  ].some(v => String(v || "").toLocaleLowerCase().includes(search)));
+  empty.style.display = rows.length ? "none" : "block";
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.txn_date)}</td><td>${escapeHtml(r.person_name)}</td><td>${MODE_LABEL[r.payment_mode] || escapeHtml(r.payment_mode)}</td>
+      <td class="eo-num">${money(r.amount)}</td><td>${escapeHtml(r.reason || "—")}</td>
+      <td><div class="eo-actions">
+        ${myAccess.canEdit ? `<button class="btn btn-ghost btn-sm" data-edit="${escapeHtml(r.transaction_id)}">Edit</button>` : ""}
+        ${myAccess.canDelete ? `<button class="btn btn-danger btn-sm" data-delete="${escapeHtml(r.transaction_id)}">Delete</button>` : ""}
+      </div></td>
+    </tr>`).join("");
+  body.querySelectorAll("[data-edit]").forEach(btn => btn.onclick = () => {
+    const row = records.find(r => r.transaction_id === btn.dataset.edit);
+    if (row) openRecordModal(row.txn_type, row);
+  });
+  body.querySelectorAll("[data-delete]").forEach(btn => btn.onclick = () => {
+    const row = records.find(r => r.transaction_id === btn.dataset.delete);
+    if (row) confirmDelete(row);
+  });
+}
+
+function openLedger(key) {
+  const ledger = getLedgers().get(key);
+  if (!ledger) return;
+  const currentLedger = getLedgers(records, today()).get(key) || ledger;
+  const entries = [...ledger.entries].sort((a,b) => a.txn_date.localeCompare(b.txn_date) || a.created_at.localeCompare(b.created_at));
+  let running = 0;
+  const rows = entries.map(r => {
+    const amount = Number(r.amount) || 0;
+    running += r.txn_type === "extra_out" ? amount : -amount;
+    return `<tr><td>${escapeHtml(r.txn_date)}</td><td>${TYPE_LABEL[r.txn_type]}</td><td>${MODE_LABEL[r.payment_mode] || escapeHtml(r.payment_mode)}</td><td class="eo-num">${r.txn_type === "extra_out" ? "+" : "−"}${money(amount)}</td><td class="eo-num">${money(running)}</td><td>${escapeHtml(r.reason || "—")}</td></tr>`;
+  }).join("");
+  openModal({
+    title: escapeHtml(ledger.name) + " — Ledger",
+    subtitle: `Current outstanding due: ${money(currentLedger.due)}`,
+    wide:true,
+    bodyHtml:`<div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Type</th><th>Mode</th><th class="eo-num">Amount</th><th class="eo-num">Balance</th><th>Reason / Remark</th></tr></thead><tbody>${rows}</tbody></table></div>`,
+    footHtml:`<button class="btn btn-primary" data-close>Close</button>`
+  });
+}
+
+function personOptionsHtml(selectedName) {
+  const ledgers = [...getLedgers(records, today()).values()].filter(l => l.due > 0.005 || (selectedName && personKey(l.name) === personKey(selectedName)))
+    .sort((a,b) => a.name.localeCompare(b.name));
+  return ledgers.map(l => `<option value="${escapeHtml(l.name)}" ${personKey(l.name) === personKey(selectedName) ? "selected" : ""}>${escapeHtml(l.name)} — due ${money(l.due)}</option>`).join("");
+}
+
+function openRecordModal(type, existing) {
+  const isEdit = !!existing;
+  const isAdjustment = type === "adjustment";
+  const canSave = isEdit ? myAccess.canEdit : myAccess.canCreate;
+  if (!canSave) return;
+  const currentName = existing ? existing.person_name : "";
+  const nameControl = isAdjustment
+    ? `<select class="input" id="eoName"><option value="">Select a person</option>${personOptionsHtml(currentName)}</select>`
+    : `<input class="input" id="eoName" maxlength="160" value="${escapeHtml(currentName)}" placeholder="Person's name" />`;
+  openModal({
+    title:isEdit ? `Edit ${TYPE_LABEL[type]}` : (isAdjustment ? "Record repayment" : "Give money"),
+    subtitle:isAdjustment ? "Record money returned by a person." : "Record money temporarily given to a person.",
+    bodyHtml:`
+      <div class="field"><label for="eoDate">Date</label><input class="input" type="date" id="eoDate" value="${escapeHtml(existing ? existing.txn_date : today())}" /><div class="field-error" id="eoDateErr">Select a date.</div></div>
+      <div class="field"><label for="eoName">Name</label>${nameControl}<div class="field-error" id="eoNameErr">Enter or select a name.</div></div>
+      <div class="field"><label for="eoMode">Mode</label><select class="input" id="eoMode">
+        <option value="cash" ${!existing || existing.payment_mode === "cash" ? "selected" : ""}>Cash</option>
+        <option value="bank" ${existing && existing.payment_mode === "bank" ? "selected" : ""}>Bank</option>
+        <option value="phonepe" ${existing && existing.payment_mode === "phonepe" ? "selected" : ""}>PhonePe</option>
+      </select></div>
+      <div class="field"><label for="eoAmount">Amount</label><input class="input" type="number" min="0.01" step="0.01" id="eoAmount" value="${existing ? escapeHtml(existing.amount) : ""}" /><div class="field-error" id="eoAmountErr">Enter an amount greater than zero.</div></div>
+      <div class="field"><label for="eoReason">${isAdjustment ? "Remark (optional)" : "Reason (optional)"}</label><textarea class="input" id="eoReason" rows="3" maxlength="500">${escapeHtml(existing ? existing.reason || "" : "")}</textarea></div>
+      ${isAdjustment ? `<p class="eo-note" id="eoDueHint"></p>` : ""}
+    `,
+    footHtml:`<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary" id="saveEoBtn">${isEdit ? "Save changes" : "Save"}</button>`,
+    onOpen:() => {
+      if (isAdjustment) {
+        $("eoName").onchange = updateAdjustmentDueHint;
+        updateAdjustmentDueHint();
+      }
+      $("saveEoBtn").onclick = () => saveRecord(type, existing);
+    }
+  });
+}
+
+function updateAdjustmentDueHint() {
+  const ledger = getLedgers(records, today()).get(personKey($("eoName").value));
+  $("eoDueHint").textContent = ledger ? `Current due: ${money(ledger.due)}` : "Choose a person with an outstanding due.";
+}
+
+function candidateRecords(existing, payload) {
+  if (!existing) return [...records, { ...payload, transaction_id:"__new__" }];
+  return records.map(r => r.transaction_id === existing.transaction_id ? { ...r, ...payload } : r);
+}
+
+function validateLedger(candidate, name) {
+  const key = personKey(name);
+  const entries = candidate.filter(r => personKey(r.person_name) === key)
+    .sort((a,b) => a.txn_date.localeCompare(b.txn_date) ||
+      (a.txn_type === b.txn_type ? String(a.created_at || "").localeCompare(String(b.created_at || "")) : a.txn_type === "extra_out" ? -1 : 1));
+  let due = 0;
+  for (const entry of entries) {
+    due += (entry.txn_type === "extra_out" ? 1 : -1) * Number(entry.amount || 0);
+    if (due < -0.005) {
+      showToast("This change would make repayments exceed the amount given on that date.", "error");
+      return false;
+    }
+  }
+  return true;
+}
+
+async function saveRecord(type, existing) {
+  const date = $("eoDate").value;
+  const name = $("eoName").value.trim();
+  const amount = Number($("eoAmount").value);
+  const mode = $("eoMode").value;
+  const reason = $("eoReason").value.trim();
+  let valid = true;
+  if (!date) { $("eoDateErr").classList.add("show"); valid = false; } else $("eoDateErr").classList.remove("show");
+  if (!name) { $("eoNameErr").classList.add("show"); valid = false; } else $("eoNameErr").classList.remove("show");
+  if (!Number.isFinite(amount) || amount <= 0) { $("eoAmountErr").classList.add("show"); valid = false; } else $("eoAmountErr").classList.remove("show");
+  if (!valid) return;
+
+  const payload = { txn_type:type, txn_date:date, person_name:name, payment_mode:mode, amount, reason:reason || null };
+  const proposed = candidateRecords(existing, payload);
+  if (!validateLedger(proposed, name)) return;
+  if (existing && personKey(existing.person_name) !== personKey(name) && !validateLedger(proposed, existing.person_name)) return;
+
+  const button = $("saveEoBtn");
+  button.disabled = true;
+  try {
+    if (existing) {
+      const stamped = await withAuditStamp(payload, { isNew:false });
+      const { error } = await supabaseClient.from("extra_out_transactions").update(stamped).eq("transaction_id", existing.transaction_id);
+      if (error) throw error;
+      await logAudit("extra_out_transactions", existing.transaction_id, "update", existing, stamped);
+    } else {
+      const stamped = await withAuditStamp(payload, { isNew:true });
+      const { data, error } = await supabaseClient.from("extra_out_transactions").insert(stamped).select().single();
+      if (error) throw error;
+      await logAudit("extra_out_transactions", data.transaction_id, "insert", null, stamped);
+    }
+    closeModal();
+    showToast(existing ? "Record updated." : "Record saved.", "success");
+    await loadRecords();
+  } catch (error) {
+    showToast("Could not save record: " + error.message, "error");
+    button.disabled = false;
+  }
+}
+
+function confirmDelete(row) {
+  const proposed = records.filter(r => r.transaction_id !== row.transaction_id);
+  if (!validateLedger(proposed, row.person_name)) return;
+  openModal({
+    title:"Delete record?",
+    subtitle:"This action cannot be undone.",
+    bodyHtml:`<p>Delete the ${TYPE_LABEL[row.txn_type].toLowerCase()} of <strong>${money(row.amount)}</strong> for ${escapeHtml(row.person_name)} dated ${escapeHtml(row.txn_date)}?</p>`,
+    footHtml:`<button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-danger" id="confirmDeleteEo">Delete</button>`,
+    onOpen:() => {
+      $("confirmDeleteEo").onclick = async () => {
+        const { error } = await supabaseClient.from("extra_out_transactions").delete().eq("transaction_id", row.transaction_id);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("extra_out_transactions", row.transaction_id, "delete", row, null);
+        closeModal();
+        showToast("Record deleted.", "success");
+        await loadRecords();
+      };
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
