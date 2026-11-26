@@ -8,9 +8,26 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="../assets/js/config.js"></script>
 <script src="../assets/js/common.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
+  .st-tabs { display:flex; gap:8px; margin:18px 0; flex-wrap:wrap; }
+  .st-tab-btn { padding:8px 16px; border-radius:var(--radius-md,8px); border:1px solid var(--ink,#ccc); background:transparent; cursor:pointer; font-weight:600; }
+  .st-tab-btn.active { background:var(--brass,#b08d57); color:#fff; border-color:transparent; }
+  .st-panel { display:none; } .st-panel.show { display:block; }
   .st-search { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
   .st-search .field { flex:1; min-width:220px; margin:0; }
+  .st-roster-filters { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px; }
+  .st-roster-filters .field { min-width:180px; margin-bottom:0; }
+  .st-column-options { display:flex; flex-wrap:wrap; gap:10px 18px; margin:12px 0 16px; }
+  .st-column-options label, .st-blank-column label { display:flex; align-items:center; gap:7px; }
+  .st-column-options input, .st-blank-column input[type="checkbox"] { width:auto; }
+  .st-blank-columns { display:grid; gap:8px; margin:10px 0 16px; }
+  .st-blank-column { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .st-blank-column .input { max-width:280px; }
+  .st-add-column { margin:8px 0 12px; }
+  .st-roster-table { min-width:700px; }
   .st-results { display:grid; gap:8px; margin-top:14px; }
   .st-result { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--ink,#ddd); border-radius:var(--radius-md,8px); }
   .st-result strong { display:block; }
@@ -58,10 +75,15 @@
   <div class="page-header">
     <span class="eyebrow">Academics</span>
     <h1>Student</h1>
-    <p>Search for a student to view their profile, payments, dues, and exam results.</p>
+    <p>Search individual student profiles or prepare a class/section student list for download.</p>
   </div>
 
-  <section class="card">
+  <div class="st-tabs" role="tablist" aria-label="Student tools">
+    <button class="st-tab-btn active" type="button" role="tab" aria-selected="true" data-tab="individual">Individual student search</button>
+    <button class="st-tab-btn" type="button" role="tab" aria-selected="false" data-tab="classwise">Class/section list &amp; download</button>
+  </div>
+
+  <section class="st-panel show card" id="tab-individual" role="tabpanel">
     <form class="st-search" id="studentSearchForm">
       <div class="field">
         <label for="studentSearch">Student name or Reg No</label>
@@ -70,9 +92,41 @@
       <button class="btn btn-primary" type="submit" id="studentSearchBtn">Search</button>
     </form>
     <div id="searchResults" aria-live="polite"></div>
+    <section class="card" id="studentProfile" style="display:none; margin-top:18px;"></section>
   </section>
 
-  <section class="card" id="studentProfile" style="display:none; margin-top:18px;"></section>
+  <section class="st-panel card" id="tab-classwise" role="tabpanel">
+    <h3>Class/section student list</h3>
+    <p>Select a class and optionally a section to fetch its students. Choose the columns before exporting.</p>
+    <div class="st-roster-filters">
+      <div class="field"><label for="rosterClass">Class</label><select class="input" id="rosterClass"><option value="">Select a class</option></select></div>
+      <div class="field"><label for="rosterSection">Section</label><select class="input" id="rosterSection" disabled><option value="">All sections</option></select></div>
+      <div class="field" style="display:flex;align-items:center;gap:8px;min-width:auto;">
+        <input type="checkbox" id="rosterIncludeInactive" style="width:auto;" />
+        <label for="rosterIncludeInactive" style="margin:0;">Include deactivated students</label>
+      </div>
+      <button class="btn btn-primary" type="button" id="rosterFetchBtn">Fetch students</button>
+    </div>
+    <h4>Columns to include</h4>
+    <div class="st-column-options">
+      <label><input type="checkbox" checked disabled /> Serial No. (always included)</label>
+      <label><input type="checkbox" checked disabled /> Student name (always included)</label>
+      <label><input type="checkbox" class="roster-column" value="reg_no" checked /> Registration No.</label>
+      <label><input type="checkbox" class="roster-column" value="roll_no" checked /> Roll No.</label>
+      <label><input type="checkbox" class="roster-column" value="father_name" checked /> Father's name</label>
+      <label><input type="checkbox" class="roster-column" value="section" checked /> Section</label>
+      <label><input type="checkbox" class="roster-column" value="class" checked /> Class</label>
+      <label><input type="checkbox" class="roster-column" value="mobile_no" checked /> Mobile No.</label>
+    </div>
+    <p>Add a custom blank column for writing notes on the downloaded list. Set its heading, for example “Remark”.</p>
+    <button class="btn btn-primary st-add-column" type="button" id="addBlankColumnBtn">+ Add a blank column</button>
+    <div class="st-blank-columns" id="blankColumns"></div>
+    <div class="st-roster-filters">
+      <button class="btn btn-ghost" type="button" id="rosterExcelBtn" disabled>Download Excel</button>
+      <button class="btn btn-ghost" type="button" id="rosterPdfBtn" disabled>Download PDF</button>
+    </div>
+    <div id="rosterResult" aria-live="polite"></div>
+  </section>
 </div>
 <div id="modalRoot"></div>
 <div id="toastRoot" class="toast-stack"></div>
@@ -80,6 +134,10 @@
 const PAGE_ID = "student";
 let myAccess = null;
 let currentStudent = null;
+let rosterStudents = [];
+let rosterLoaded = false;
+let blankColumnCount = 0;
+let sectionLoadVersion = 0;
 const CLASS_LABELS = {
   "1":"Class 1","2":"Class 2","3":"Class 3","4":"Class 4","5":"Class 5","6":"Class 6",
   "7":"Class 7","8":"Class 8","9":"Class 9","10":"Class 10","11-arts":"Class 11 — Arts",
@@ -96,6 +154,200 @@ async function init() {
   myAccess = await getMyAccess(PAGE_ID);
   if (!myAccess.profile || !myAccess.canView) return;
   $("studentSearchForm").addEventListener("submit", searchStudents);
+  Object.entries(CLASS_LABELS).forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    $("rosterClass").appendChild(option);
+  });
+  document.querySelectorAll(".st-tab-btn").forEach(button => button.addEventListener("click", () => showStudentTab(button.dataset.tab)));
+  $("rosterClass").addEventListener("change", loadRosterSections);
+  $("rosterIncludeInactive").addEventListener("change", loadRosterSections);
+  $("rosterFetchBtn").addEventListener("click", fetchRoster);
+  $("addBlankColumnBtn").addEventListener("click", addBlankColumn);
+  document.querySelectorAll(".roster-column").forEach(input => input.addEventListener("change", renderRoster));
+  $("rosterExcelBtn").addEventListener("click", () => exportRoster("excel"));
+  $("rosterPdfBtn").addEventListener("click", () => exportRoster("pdf"));
+}
+
+function showStudentTab(tab) {
+  document.querySelectorAll(".st-tab-btn").forEach(button => {
+    const active = button.dataset.tab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll(".st-panel").forEach(panel => panel.classList.toggle("show", panel.id === `tab-${tab}`));
+}
+
+async function loadRosterSections() {
+  const classValue = $("rosterClass").value;
+  const sectionSelect = $("rosterSection");
+  const version = ++sectionLoadVersion;
+  sectionSelect.innerHTML = '<option value="">All sections</option>';
+  sectionSelect.disabled = !classValue;
+  rosterStudents = [];
+  rosterLoaded = false;
+  $("rosterExcelBtn").disabled = true;
+  $("rosterPdfBtn").disabled = true;
+  $("rosterResult").innerHTML = "";
+  if (!classValue) return;
+  sectionSelect.disabled = true;
+  try {
+    const includeInactive = $("rosterIncludeInactive").checked;
+    const rows = await fetchAll(() => {
+      let query = supabaseClient.from("student_master").select("section,reg_no").eq("class", classValue).order("reg_no");
+      if (!includeInactive) query = query.eq("status", "active");
+      return query;
+    });
+    if (version !== sectionLoadVersion) return;
+    [...new Set(rows.map(row => String(row.section || "").trim()).filter(Boolean))]
+      .sort((a,b) => a.localeCompare(b, undefined, { numeric:true }))
+      .forEach(section => {
+        const option = document.createElement("option");
+        option.value = section;
+        option.textContent = section;
+        sectionSelect.appendChild(option);
+      });
+  } catch (error) {
+    if (version === sectionLoadVersion) showToast("Could not load sections: " + (error.message || String(error)), "error");
+  } finally {
+    if (version === sectionLoadVersion) sectionSelect.disabled = false;
+  }
+}
+
+async function fetchRoster() {
+  const classValue = $("rosterClass").value;
+  if (!classValue) {
+    showToast("Select a class first.", "error");
+    return;
+  }
+  const button = $("rosterFetchBtn");
+  button.disabled = true;
+  $("rosterClass").disabled = true;
+  $("rosterSection").disabled = true;
+  $("rosterIncludeInactive").disabled = true;
+  $("rosterExcelBtn").disabled = true;
+  $("rosterPdfBtn").disabled = true;
+  rosterLoaded = false;
+  $("rosterResult").innerHTML = '<div class="skeleton" style="height:24px"></div>';
+  try {
+    const includeInactive = $("rosterIncludeInactive").checked;
+    const selectedSection = $("rosterSection").value;
+    rosterStudents = await fetchAll(() => {
+      let query = supabaseClient.from("student_master")
+        .select("reg_no,name,father_name,class,mobile_no,roll_no,section,status")
+        .eq("class", classValue).order("reg_no");
+      if (!includeInactive) query = query.eq("status", "active");
+      if (selectedSection) query = query.eq("section", selectedSection);
+      return query;
+    });
+    rosterLoaded = true;
+    rosterStudents.sort((a,b) => {
+      const rollA = String(a.roll_no || "").trim(), rollB = String(b.roll_no || "").trim();
+      if (!rollA && rollB) return 1;
+      if (rollA && !rollB) return -1;
+      const rollOrder = rollA.localeCompare(rollB, undefined, { numeric:true, sensitivity:"base" });
+      return rollOrder || String(a.name || "").localeCompare(String(b.name || ""));
+    });
+    renderRoster();
+    $("rosterExcelBtn").disabled = !rosterStudents.length;
+    $("rosterPdfBtn").disabled = !rosterStudents.length;
+  } catch (error) {
+    rosterStudents = [];
+    rosterLoaded = false;
+    $("rosterResult").innerHTML = `<div class="field-error show">Could not fetch students: ${escapeHtml(error.message || String(error))}</div>`;
+  } finally {
+    button.disabled = false;
+    $("rosterClass").disabled = false;
+    $("rosterSection").disabled = !$("rosterClass").value;
+    $("rosterIncludeInactive").disabled = false;
+  }
+}
+
+function selectedRosterColumns() {
+  const fields = [...document.querySelectorAll(".roster-column:checked")].map(input => ({
+    key:input.value,
+    title:{
+      reg_no:"Registration No.",
+      roll_no:"Roll No.",
+      father_name:"Father's name",
+      section:"Section",
+      class:"Class",
+      mobile_no:"Mobile No."
+    }[input.value]
+  }));
+  document.querySelectorAll(".st-blank-column").forEach(row => {
+    const checkbox = row.querySelector('input[type="checkbox"]');
+    const title = row.querySelector('input[type="text"]').value.trim();
+    if (checkbox.checked && title) fields.push({ key:"", title });
+  });
+  return [{ key:"serial", title:"Serial No." }, { key:"name", title:"Student name" }, ...fields];
+}
+
+function rosterCell(student, column, index) {
+  if (column.key === "serial") return String(index + 1);
+  if (column.key === "name") return student.name || "";
+  if (column.key === "class") return CLASS_LABELS[student.class] || student.class || "";
+  return column.key ? (student[column.key] || "") : "";
+}
+
+function renderRoster() {
+  const result = $("rosterResult");
+  if (!rosterLoaded) {
+    result.innerHTML = "";
+    return;
+  }
+  if (!rosterStudents.length) {
+    result.innerHTML = `<div class="empty-state"><p>No students found for this class/section.</p></div>`;
+    return;
+  }
+  const columns = selectedRosterColumns();
+  result.innerHTML = `<p>${rosterStudents.length} student${rosterStudents.length === 1 ? "" : "s"} found.</p>
+    <div class="table-wrap"><table class="data st-roster-table"><thead><tr>${columns.map(column => `<th>${escapeHtml(column.title)}</th>`).join("")}</tr></thead>
+      <tbody>${rosterStudents.map((student,index) => `<tr>${columns.map(column => `<td>${escapeHtml(rosterCell(student,column,index))}</td>`).join("")}</tr>`).join("")}</tbody>
+    </table></div>`;
+}
+
+function addBlankColumn() {
+  const id = ++blankColumnCount;
+  const row = document.createElement("div");
+  row.className = "st-blank-column";
+  row.innerHTML = `<label><input type="checkbox" checked aria-label="Include blank column ${id}" /> Include</label>
+    <label>Heading <input class="input" type="text" maxlength="40" value="Remark" placeholder="e.g. Remark" aria-label="Blank column heading ${id}" /></label>
+    <button class="btn btn-ghost btn-sm" type="button" aria-label="Remove blank column ${id}">Remove</button>`;
+  row.querySelector("input[type='checkbox']").addEventListener("change", renderRoster);
+  row.querySelector("input[type='text']").addEventListener("input", renderRoster);
+  row.querySelector("button").addEventListener("click", () => { row.remove(); renderRoster(); });
+  $("blankColumns").appendChild(row);
+  renderRoster();
+}
+
+function exportRoster(format) {
+  if (!rosterStudents.length) {
+    showToast("Fetch students before exporting.", "error");
+    return;
+  }
+  const columns = selectedRosterColumns();
+  const rows = rosterStudents.map((student,index) => columns.map(column => rosterCell(student,column,index)));
+  const classTag = String($("rosterClass").value).replace(/[^a-z0-9_-]/gi, "_");
+  const sectionTag = $("rosterSection").value ? "_" + $("rosterSection").value.replace(/[^a-z0-9_-]/gi, "_") : "";
+  const fileTag = `student_list_${classTag}${sectionTag}`;
+  try {
+    if (format === "excel") {
+      if (!window.XLSX) throw new Error("Excel export library is unavailable. Reload the page and try again.");
+      const worksheet = XLSX.utils.aoa_to_sheet([columns.map(column => column.title), ...rows]);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Students");
+      XLSX.writeFile(workbook, `${fileTag}.xlsx`);
+    } else {
+      if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("PDF export library is unavailable. Reload the page and try again.");
+      const doc = new window.jspdf.jsPDF({ orientation:"landscape" });
+      doc.autoTable({ head:[columns.map(column => column.title)], body:rows, styles:{ fontSize:9 } });
+      doc.save(`${fileTag}.pdf`);
+    }
+  } catch (error) {
+    showToast("Could not export student list: " + (error.message || String(error)), "error");
+  }
 }
 
 async function fetchAll(makeQuery) {

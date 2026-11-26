@@ -3,7 +3,7 @@
    Caches app shell for offline support and fast loads.
    ============================================================================ */
 
-const CACHE_NAME = 'gha-portal-v2';
+const CACHE_NAME = 'gha-portal-v3';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
